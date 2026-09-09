@@ -15,6 +15,18 @@ export async function GET() {
       participar_campanhas: "SIM",
     },
     {
+      // Mesmo MLB da linha acima, variação diferente (mesmo anúncio, outra
+      // cor/tamanho) — repita o MLB, um SKU por linha, cada um com seu
+      // próprio custo. O sistema usa a variação de maior custo como
+      // referência de segurança na hora de decidir a campanha.
+      mlb: "MLB1234567890",
+      sku: "CAMISETA-AZUL-G",
+      cmv: 49.9,
+      margem_minima_pct: 12,
+      margem_alvo_pct: 20,
+      participar_campanhas: "SIM",
+    },
+    {
       mlb: "MLB9876543210",
       sku: "",
       cmv: 120,
@@ -34,15 +46,16 @@ export async function GET() {
   const instrucoes = [
     {
       Coluna: "mlb",
-      "Obrigatório?": "Sim (ou sku)",
-      Descrição: "Identificador do anúncio no Mercado Livre.",
+      "Obrigatório?": "Sim",
+      Descrição:
+        "Identificador do anúncio no Mercado Livre. Item COM variação (cor/tamanho etc.): repita o mesmo mlb numa linha por SKU — o Mercado Livre grava o preço promocional a nível de anúncio inteiro, não por variação, então o sistema usa a variação de MAIOR custo (menor margem) como referência de segurança antes de aceitar qualquer campanha pra esse MLB.",
       "Formato / Exemplo": "MLB1234567890",
     },
     {
       Coluna: "sku",
-      "Obrigatório?": "Não",
+      "Obrigatório?": "Não (mas obrigatório se o mlb tiver mais de uma linha)",
       Descrição:
-        "Seu código interno (SELLER_SKU). Fica só de referência no painel — quem identifica o item pro cálculo é o mlb.",
+        "Seu código interno (SELLER_SKU) da variação. Precisa bater exatamente com o SELLER_SKU cadastrado naquela variação no Mercado Livre — se não bater, o sistema avisa no log e usa o preço do anúncio inteiro como aproximação.",
       "Formato / Exemplo": "CAMISETA-AZUL-M",
     },
     {

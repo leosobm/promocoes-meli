@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { createServiceSupabase } from "@/lib/supabase/server";
 import { MercadoLivreClient } from "@/lib/mercadolivre/client";
 import { getCampaignTypeConfig } from "@/lib/mercadolivre/campaignTypes";
+import { resolveCurrentPrice } from "@/lib/mercadolivre/variations";
 import {
   calcDescontoConsumidorPct,
   calcMargemResultante,
@@ -25,10 +26,16 @@ interface AppSettings {
 
 interface ItemConfigRow {
   mlb: string;
-  sku: string | null;
+  sku: string; // '' = item sem variação (ou variação não informada)
   cmv: number;
   margem_minima_pct: number;
   margem_alvo_pct: number | null;
+}
+
+interface VariacaoResultado {
+  sku: string | null;
+  cmv: number;
+  margem_calculada_pct: number | null;
 }
 
 /** Extrai o percentual "participação do ML" e a fonte usada — para
@@ -40,6 +47,39 @@ function extractMlParticipacao(p: ItemPromotion): { pct: number | null; fonte: s
   const meliPct = p.meli_percentage ?? p.benefits?.meli_percent ?? null;
   if (meliPct != null) return { pct: meliPct / 100, fonte: "meli_percentage" };
   return { pct: null, fonte: null };
+}
+
+/** Preço mínimo necessário pra UMA variação atingir sua margem-alvo (ou, se
+ * isso for matematicamente impossível — taxas+comissão já comem tudo —,
+ * tenta a margem mínima como segunda tentativa antes de desistir). */
+function precoNecessarioParaRow(
+  row: ItemConfigRow,
+  ctx: { freteMedio: number; taxasPct: number; comissaoPct: number; descontoTarifaPct: number },
+): { preco: number; erro: null } | { preco: null; erro: string } {
+  const alvoFrac = (row.margem_alvo_pct ?? row.margem_minima_pct) / 100;
+  try {
+    return { preco: calcPrecoParaMargem({ cmv: row.cmv, ...ctx, margemAlvoPct: alvoFrac }), erro: null };
+  } catch {
+    if (row.margem_alvo_pct == null) {
+      return {
+        preco: null,
+        erro: `Taxas + comissão já ultrapassam a margem mínima de ${row.margem_minima_pct}% — nenhum preço cobre isso.`,
+      };
+    }
+    const minimaFrac = row.margem_minima_pct / 100;
+    try {
+      return { preco: calcPrecoParaMargem({ cmv: row.cmv, ...ctx, margemAlvoPct: minimaFrac }), erro: null };
+    } catch {
+      return {
+        preco: null,
+        erro: `Taxas + comissão já ultrapassam a margem mínima de ${row.margem_minima_pct}% — nenhum preço cobre isso.`,
+      };
+    }
+  }
+}
+
+function rowLabel(row: ItemConfigRow): string {
+  return row.sku ? `SKU ${row.sku}` : `${row.mlb} (sem SKU)`;
 }
 
 export async function* runUpdate(): AsyncGenerator<ProgressEvent> {
@@ -66,53 +106,39 @@ export async function* runUpdate(): AsyncGenerator<ProgressEvent> {
     yield { type: "error", message: `Falha ao ler item_config: ${icErr.message}` };
     return;
   }
-  const items = (itemConfigs ?? []) as ItemConfigRow[];
-  if (items.length === 0) {
+  const allRows = (itemConfigs ?? []) as ItemConfigRow[];
+  if (allRows.length === 0) {
     yield { type: "error", message: "Nenhum item cadastrado em item_config (ou todos com participar_campanhas=false)." };
     return;
   }
 
-  yield { type: "log", message: `${items.length} itens configurados. Conectando ao Mercado Livre...` };
+  const byMlb = new Map<string, ItemConfigRow[]>();
+  for (const row of allRows) {
+    if (!byMlb.has(row.mlb)) byMlb.set(row.mlb, []);
+    byMlb.get(row.mlb)!.push(row);
+  }
+  const mlbs = [...byMlb.keys()];
+
+  yield {
+    type: "log",
+    message: `${mlbs.length} MLBs configurados (${allRows.length} linhas / variações no total). Conectando ao Mercado Livre...`,
+  };
   const client = await MercadoLivreClient.fromStore();
   const userId = await client.getUserId();
-
-  yield { type: "log", message: "Buscando detalhes dos anúncios..." };
-  const mlbs = items.map((i) => i.mlb);
-  const detailsMap = await client.getItemsDetails(mlbs);
-
-  const itemsCacheRows = mlbs
-    .map((mlb) => {
-      const d = detailsMap.get(mlb);
-      if (!d) return null;
-      return {
-        mlb,
-        title: d.title ?? null,
-        category_id: d.category_id ?? null,
-        price: d.price ?? null,
-        sku: extractSku(d),
-        listing_type_id: d.listing_type_id ?? null,
-        shipping: d.shipping ?? null,
-        status: d.status ?? null,
-        fetched_at: new Date().toISOString(),
-      };
-    })
-    .filter((r): r is NonNullable<typeof r> => r !== null);
-  if (itemsCacheRows.length > 0) {
-    await supabase.from("items_cache").upsert(itemsCacheRows);
-  }
 
   const runId = randomUUID();
   let totalDecisions = 0;
   let totalEscolhidas = 0;
 
-  for (let idx = 0; idx < items.length; idx++) {
-    const cfg = items[idx];
-    const detail = detailsMap.get(cfg.mlb);
-    yield { type: "progress", done: idx, total: items.length };
+  for (let idx = 0; idx < mlbs.length; idx++) {
+    const mlb = mlbs[idx];
+    const rows = byMlb.get(mlb)!;
+    yield { type: "progress", done: idx, total: mlbs.length };
 
+    const detail = await client.getItemDetail(mlb);
     if (!detail) {
       await insertDecision(supabase, runId, {
-        mlb: cfg.mlb,
+        mlb,
         promotion_type: "-",
         motivo: "Não foi possível obter os detalhes do anúncio na API (item removido/inativo?).",
         status: "erro",
@@ -121,15 +147,41 @@ export async function* runUpdate(): AsyncGenerator<ProgressEvent> {
       continue;
     }
 
+    await supabase.from("items_cache").upsert({
+      mlb,
+      title: detail.title ?? null,
+      category_id: detail.category_id ?? null,
+      price: detail.price ?? null,
+      sku: extractSku(detail),
+      listing_type_id: detail.listing_type_id ?? null,
+      shipping: detail.shipping ?? null,
+      status: detail.status ?? null,
+      fetched_at: new Date().toISOString(),
+    });
+
+    // Avisa (sem travar) quando um SKU cadastrado não bate com nenhuma
+    // variação do anúncio — o cálculo cai pro preço do item inteiro, o que
+    // pode não refletir o preço real daquela variação.
+    for (const row of rows) {
+      if (!row.sku) continue;
+      const { skuEncontrado } = resolveCurrentPrice(detail, row.sku);
+      if (!skuEncontrado) {
+        yield {
+          type: "log",
+          message: `[aviso] ${mlb}: SKU '${row.sku}' não encontrado nas variações do anúncio — usando preço do item inteiro como aproximação.`,
+        };
+      }
+    }
+
     const [commission, freeShipping, promotions] = await Promise.all([
       client.getCommission(detail),
       client.getFreeShippingCost(userId, detail),
-      client.getItemPromotions(cfg.mlb),
+      client.getItemPromotions(mlb),
     ]);
 
     if (!commission.ok || commission.percentage_fee == null) {
       await insertDecision(supabase, runId, {
-        mlb: cfg.mlb,
+        mlb,
         promotion_type: "-",
         motivo: `Não foi possível calcular a comissão (${commission.error ?? "sem detalhe"}) — item pulado.`,
         status: "erro",
@@ -142,7 +194,7 @@ export async function* runUpdate(): AsyncGenerator<ProgressEvent> {
 
     if (promotions.length === 0) {
       await insertDecision(supabase, runId, {
-        mlb: cfg.mlb,
+        mlb,
         promotion_type: "-",
         motivo: "Nenhuma campanha candidata/ativa encontrada para este item.",
         status: "pendente",
@@ -154,81 +206,99 @@ export async function* runUpdate(): AsyncGenerator<ProgressEvent> {
     const evaluated: {
       promo: ItemPromotion;
       preco: number;
-      margemPct: number;
+      margemPct: number; // pior margem entre as variações
+      skuReferencia: string | null;
       descontoPct: number;
       mlPct: number | null;
       mlFonte: string | null;
       score: number;
       rejeitada: string | null;
+      variacoes: VariacaoResultado[] | null;
     }[] = [];
 
     for (const promo of promotions) {
       const typeCfg = getCampaignTypeConfig(promo.promotion_type);
-      const precoOriginal = promo.original_price ?? detail.price ?? 0;
       const { pct: mlPct, fonte: mlFonte } = extractMlParticipacao(promo);
       const descontoTarifaPctFrac = mlFonte === "discount_meli_boosted_percentage" ? (mlPct ?? 0) : 0;
       const descontoTarifaValor = promo.discount_meli_boost_amount ?? 0;
+      const priceCtx = { freteMedio, taxasPct, comissaoPct, descontoTarifaPct: descontoTarifaPctFrac };
 
       let preco: number;
+
       if (typeCfg.priceMode === "seller_defined") {
-        const margemAlvoFrac = (cfg.margem_alvo_pct ?? cfg.margem_minima_pct) / 100;
-        try {
-          preco = calcPrecoParaMargem({
-            cmv: cfg.cmv,
-            freteMedio,
-            taxasPct,
-            comissaoPct,
-            margemAlvoPct: margemAlvoFrac,
-            descontoTarifaPct: descontoTarifaPctFrac,
-          });
-        } catch (e) {
+        // Um único deal_price vale pro MLB inteiro (confirmado: a API de
+        // Promoções não aceita preço por variação) — usa o MAIOR preço
+        // necessário entre as variações, garantindo que a de maior custo
+        // também atinja sua margem-alvo (as mais baratas só lucram mais).
+        let maiorPreco = -Infinity;
+        let erroImpossivel: string | null = null;
+        for (const row of rows) {
+          const r = precoNecessarioParaRow(row, priceCtx);
+          if (r.erro !== null) {
+            erroImpossivel = `${rowLabel(row)}: ${r.erro}`;
+            break;
+          }
+          const precoRow: number = r.preco;
+          if (precoRow > maiorPreco) maiorPreco = precoRow;
+        }
+        if (erroImpossivel) {
           evaluated.push({
-            promo, preco: 0, margemPct: -Infinity, descontoPct: 0, mlPct, mlFonte, score: 0,
-            rejeitada: e instanceof Error ? e.message : String(e),
+            promo, preco: 0, margemPct: -Infinity, skuReferencia: null, descontoPct: 0,
+            mlPct, mlFonte, score: 0, rejeitada: erroImpossivel, variacoes: null,
           });
           continue;
         }
-        if (promo.min_discounted_price != null && preco < promo.min_discounted_price) {
-          preco = promo.min_discounted_price;
-        }
-        if (promo.max_discounted_price != null && preco > promo.max_discounted_price) {
-          preco = promo.max_discounted_price;
-        }
+        preco = maiorPreco;
+        if (promo.min_discounted_price != null && preco < promo.min_discounted_price) preco = promo.min_discounted_price;
+        if (promo.max_discounted_price != null && preco > promo.max_discounted_price) preco = promo.max_discounted_price;
       } else {
         preco = promo.total_price_for_boosted_offer ?? promo.price ?? 0;
         if (!preco) {
           evaluated.push({
-            promo, preco: 0, margemPct: -Infinity, descontoPct: 0, mlPct, mlFonte, score: 0,
+            promo, preco: 0, margemPct: -Infinity, skuReferencia: null, descontoPct: 0,
+            mlPct, mlFonte, score: 0,
             rejeitada: "Campanha sem preço definido pela API e sem dados suficientes para calcular (tipo sem preço por item).",
+            variacoes: null,
           });
           continue;
         }
       }
 
-      const margemFrac = calcMargemResultante({
-        preco,
-        cmv: cfg.cmv,
-        freteMedio,
-        comissaoPct,
-        taxasPct,
-        descontoTarifaValor,
-      });
-      const margemMinimaFrac = cfg.margem_minima_pct / 100;
+      // Margem resultante de CADA variação nesse preço único — a pior
+      // decide se a campanha é segura pro MLB inteiro.
+      const variacoes: VariacaoResultado[] = [];
+      let pior: { row: ItemConfigRow; margemFrac: number } | null = null;
+      let rejeitadaPorRow: string | null = null;
+      for (const row of rows) {
+        const margemFrac = calcMargemResultante({
+          preco, cmv: row.cmv, freteMedio, comissaoPct, taxasPct, descontoTarifaValor,
+        });
+        variacoes.push({ sku: row.sku || null, cmv: row.cmv, margem_calculada_pct: margemFrac * 100 });
+        if (!pior || margemFrac < pior.margemFrac) pior = { row, margemFrac };
+        if (margemFrac < row.margem_minima_pct / 100 && !rejeitadaPorRow) {
+          rejeitadaPorRow = `${rowLabel(row)}: margem resultante ${(margemFrac * 100).toFixed(1)}% fica abaixo do mínimo de ${row.margem_minima_pct}% (preço único do MLB nesta campanha é R$ ${preco.toFixed(2)}).`;
+        }
+      }
 
-      if (margemFrac < margemMinimaFrac) {
+      if (rejeitadaPorRow) {
         evaluated.push({
-          promo, preco, margemPct: margemFrac, descontoPct: 0, mlPct, mlFonte, score: 0,
-          rejeitada: `Margem resultante ${(margemFrac * 100).toFixed(1)}% fica abaixo do mínimo de ${cfg.margem_minima_pct}%.`,
+          promo, preco, margemPct: pior!.margemFrac, skuReferencia: pior!.row.sku || null,
+          descontoPct: 0, mlPct, mlFonte, score: 0, rejeitada: rejeitadaPorRow, variacoes,
         });
         continue;
       }
 
+      const { price: precoAtualPior } = resolveCurrentPrice(detail, pior!.row.sku);
+      const precoOriginal = promo.original_price ?? precoAtualPior ?? detail.price ?? preco;
       const descontoPct = calcDescontoConsumidorPct(precoOriginal, preco);
       const { score } = calcScore(
-        { descontoConsumidorPct: descontoPct, mlParticipacaoPct: mlPct, margemPct: margemFrac },
+        { descontoConsumidorPct: descontoPct, mlParticipacaoPct: mlPct, margemPct: pior!.margemFrac },
         weights,
       );
-      evaluated.push({ promo, preco, margemPct: margemFrac, descontoPct, mlPct, mlFonte, score, rejeitada: null });
+      evaluated.push({
+        promo, preco, margemPct: pior!.margemFrac, skuReferencia: pior!.row.sku || null,
+        descontoPct, mlPct, mlFonte, score, rejeitada: null, variacoes,
+      });
     }
 
     const viaveis = evaluated.filter((e) => e.rejeitada === null);
@@ -239,15 +309,16 @@ export async function* runUpdate(): AsyncGenerator<ProgressEvent> {
     for (const e of evaluated) {
       const typeCfg = getCampaignTypeConfig(e.promo.promotion_type);
       const isEscolhida = melhor !== null && e.promo.promotion_id === melhor.promo.promotion_id;
+      const refTxt = e.skuReferencia ? ` (referência: SKU ${e.skuReferencia}, a de menor margem entre ${rows.length} variação(ões))` : "";
       const motivo = e.rejeitada
         ? `Rejeitada: ${e.rejeitada}`
         : isEscolhida
-          ? `Escolhida: melhor pontuação (${e.score.toFixed(1)}) entre ${viaveis.length} campanha(s) viável(is)` +
+          ? `Escolhida: melhor pontuação (${e.score.toFixed(1)}) entre ${viaveis.length} campanha(s) viável(is)${refTxt}` +
             (typeCfg.writeSupported ? "." : " — tipo sem gravação automática habilitada; aplique manualmente pelo painel do ML.")
-          : `Válida (margem ${(e.margemPct * 100).toFixed(1)}%) mas superada por outra campanha com pontuação maior (${melhor?.score.toFixed(1)}).`;
+          : `Válida (margem ${(e.margemPct * 100).toFixed(1)}%${refTxt}) mas superada por outra campanha com pontuação maior (${melhor?.score.toFixed(1)}).`;
 
       await insertDecision(supabase, runId, {
-        mlb: cfg.mlb,
+        mlb,
         promotion_id: e.promo.promotion_id,
         promotion_type: e.promo.promotion_type,
         offer_id: e.promo.offer_id ?? null,
@@ -257,6 +328,8 @@ export async function* runUpdate(): AsyncGenerator<ProgressEvent> {
         desconto_consumidor_pct: e.descontoPct * 100,
         ml_participacao_pct: e.mlPct != null ? e.mlPct * 100 : null,
         ml_participacao_fonte: e.mlFonte,
+        sku_referencia: e.skuReferencia,
+        variacoes: e.variacoes,
         score: e.score,
         escolhida: isEscolhida,
         gravavel: isEscolhida && typeCfg.writeSupported,
@@ -268,7 +341,7 @@ export async function* runUpdate(): AsyncGenerator<ProgressEvent> {
     }
   }
 
-  yield { type: "progress", done: items.length, total: items.length };
+  yield { type: "progress", done: mlbs.length, total: mlbs.length };
   yield { type: "done", runId, totalDecisions, totalEscolhidas };
 }
 
@@ -293,6 +366,8 @@ async function insertDecision(
     desconto_consumidor_pct?: number | null;
     ml_participacao_pct?: number | null;
     ml_participacao_fonte?: string | null;
+    sku_referencia?: string | null;
+    variacoes?: VariacaoResultado[] | null;
     score?: number | null;
     escolhida?: boolean;
     gravavel?: boolean;

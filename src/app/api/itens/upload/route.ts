@@ -5,14 +5,18 @@ import { createServiceSupabase } from "@/lib/supabase/server";
 
 /**
  * Aceita .csv ou .xlsx com as colunas (nomes flexíveis, ver COLUMN_ALIASES):
- *   mlb (ou sku), cmv, margem_minima_pct, margem_alvo_pct?, participar_campanhas?
- * Faz upsert em item_config por mlb. Não apaga itens ausentes do arquivo —
- * upload é incremental (rode de novo pra atualizar só o que mudou).
+ *   mlb, sku?, cmv, margem_minima_pct, margem_alvo_pct?, participar_campanhas?
+ * Faz upsert em item_config pela chave composta (mlb, sku) — um MLB pode
+ * aparecer em várias linhas, uma por SKU/variação (a API de Promoções do ML
+ * grava o preço promocional a nível de MLB, não de variação, então o motor
+ * de decisão usa a pior margem entre as variações do mesmo MLB pra decidir
+ * se uma campanha é segura pro anúncio inteiro — ver decisionEngine.ts).
+ * Não apaga itens ausentes do arquivo — upload é incremental.
  */
 
 const ROW_SCHEMA = z.object({
   mlb: z.string().trim().min(1, "MLB obrigatório"),
-  sku: z.string().trim().optional().nullable(),
+  sku: z.string().trim().default(""),
   cmv: z.coerce.number().positive("CMV deve ser > 0"),
   margem_minima_pct: z.coerce.number().min(0).max(99, "margem_minima_pct deve estar entre 0 e 99"),
   margem_alvo_pct: z.coerce.number().min(0).max(99).optional().nullable(),
@@ -70,7 +74,6 @@ export async function POST(request: NextRequest) {
       mapped.participar_campanhas = parseBool(mapped.participar_campanhas);
     }
     if (mapped.margem_alvo_pct === "") mapped.margem_alvo_pct = undefined;
-    if (mapped.sku === "") mapped.sku = undefined;
 
     const parsed = ROW_SCHEMA.safeParse(mapped);
     if (!parsed.success) {
@@ -87,37 +90,39 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Postgres rejeita upsert em lote com o mesmo valor de conflito (mlb)
-  // repetido na mesma chamada ("ON CONFLICT DO UPDATE command cannot affect
-  // row a second time") — se o arquivo tiver o mesmo MLB em mais de uma
-  // linha, mantém só a ÚLTIMA ocorrência (linha mais abaixo na planilha
-  // "vence") e avisa nos warnings quais linhas foram descartadas por isso.
-  const byMlb = new Map<string, { linha: number; data: z.infer<typeof ROW_SCHEMA> }>();
+  // Postgres rejeita upsert em lote com a mesma chave de conflito repetida
+  // ("ON CONFLICT DO UPDATE command cannot affect row a second time"). A
+  // chave aqui é (mlb, sku) — MLBs repetidos com SKUs DIFERENTES são
+  // variações legítimas e todos entram; só (mlb, sku) exatamente iguais
+  // contam como duplicata real (provável erro na planilha).
+  const byKey = new Map<string, { linha: number; data: z.infer<typeof ROW_SCHEMA> }>();
   const duplicatas: { linha: number; erro: string }[] = [];
   for (const row of validRows) {
-    const anterior = byMlb.get(row.data.mlb);
+    const key = `${row.data.mlb}::${row.data.sku}`;
+    const anterior = byKey.get(key);
     if (anterior) {
+      const skuTxt = row.data.sku ? `SKU '${row.data.sku}'` : "sem SKU";
       duplicatas.push({
         linha: anterior.linha,
-        erro: `MLB ${anterior.data.mlb} duplicado no arquivo — usada a linha ${row.linha} (mais abaixo), esta foi ignorada.`,
+        erro: `MLB ${anterior.data.mlb} (${skuTxt}) duplicado no arquivo — usada a linha ${row.linha} (mais abaixo), esta foi ignorada.`,
       });
     }
-    byMlb.set(row.data.mlb, row);
+    byKey.set(key, row);
   }
-  const dedupedRows = [...byMlb.values()].map((r) => r.data);
+  const dedupedRows = [...byKey.values()].map((r) => r.data);
 
   const supabase = createServiceSupabase();
   const { error } = await supabase.from("item_config").upsert(
     dedupedRows.map((r) => ({
       mlb: r.mlb,
-      sku: r.sku ?? null,
+      sku: r.sku,
       cmv: r.cmv,
       margem_minima_pct: r.margem_minima_pct,
       margem_alvo_pct: r.margem_alvo_pct ?? null,
       participar_campanhas: r.participar_campanhas,
       updated_at: new Date().toISOString(),
     })),
-    { onConflict: "mlb" },
+    { onConflict: "mlb,sku" },
   );
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 

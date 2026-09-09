@@ -14,9 +14,15 @@ export default async function ItensPage() {
       <div>
         <h1 className="text-xl font-semibold text-neutral-900">Itens (custo e margem)</h1>
         <p className="mt-1 text-sm text-neutral-500">
-          Envie um .csv ou .xlsx com colunas mlb/sku, cmv, margem_minima_pct, margem_alvo_pct
+          Envie um .csv ou .xlsx com colunas mlb, sku, cmv, margem_minima_pct, margem_alvo_pct
           (opcional), participar_campanhas (opcional). Upload é incremental — atualiza só quem
           está no arquivo, não apaga o resto.
+        </p>
+        <p className="mt-1 text-sm text-neutral-500">
+          Item com variação (várias cores/tamanhos sob o mesmo MLB): repita o MLB numa linha por
+          SKU, cada um com seu próprio custo. O Mercado Livre grava o preço promocional a nível
+          de MLB (não por variação), então o sistema usa a variação de maior custo como
+          referência de segurança — a campanha só é aceita se a margem continuar OK até para ela.
         </p>
         <a
           href="/api/itens/template"

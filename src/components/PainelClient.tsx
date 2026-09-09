@@ -14,6 +14,7 @@ export interface DecisionRow {
   desconto_consumidor_pct: number | null;
   ml_participacao_pct: number | null;
   ml_participacao_fonte: string | null;
+  sku_referencia: string | null;
   score: number | null;
   gravavel: boolean;
   motivo: string;
@@ -123,6 +124,9 @@ export default function PainelClient({ rows }: { rows: DecisionRow[] }) {
                   <td className="p-3">
                     <div className="font-medium text-neutral-900">{r.mlb}</div>
                     <div className="max-w-xs truncate text-xs text-neutral-500">{r.title ?? r.sku ?? ""}</div>
+                    {r.sku_referencia && (
+                      <div className="text-xs text-amber-700">SKU ref.: {r.sku_referencia}</div>
+                    )}
                   </td>
                   <td className="p-3">{r.promotion_type}</td>
                   <td className="p-3 text-right">{fmtMoney(r.preco_proposto)}</td>

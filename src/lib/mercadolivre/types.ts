@@ -69,7 +69,11 @@ export interface ItemDetail {
     free_shipping?: boolean;
   };
   attributes?: { id: string; value_name?: string }[];
-  variations?: { attributes?: { id: string; value_name?: string }[] }[];
+  variations?: {
+    id?: number;
+    price?: number | null;
+    attributes?: { id: string; value_name?: string }[];
+  }[];
 }
 
 export interface CommissionResult {

@@ -205,6 +205,19 @@ export class MercadoLivreClient {
     return items;
   }
 
+  /**
+   * Detalhe completo de UM item, incluindo variations[].attributes (onde dá
+   * pra achar o SELLER_SKU de cada variação) — o multiget /items?ids=...
+   * não traz isso por padrão, precisa de include_attributes=all.
+   */
+  async getItemDetail(id: string): Promise<ItemDetail | null> {
+    const { status, data } = await this.request<ItemDetail>("GET", `/items/${id}`, {
+      params: { include_attributes: "all" },
+    });
+    if (status !== 200) return null;
+    return data;
+  }
+
   async getItemsDetails(ids: string[]): Promise<Map<string, ItemDetail>> {
     const out = new Map<string, ItemDetail>();
     for (let i = 0; i < ids.length; i += 20) {
