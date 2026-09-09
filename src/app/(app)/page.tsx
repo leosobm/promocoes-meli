@@ -1,7 +1,8 @@
-import Link from "next/link";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { hasAutoRefresh, isConnected } from "@/lib/mercadolivre/tokens";
+import { getLatestRunReport } from "@/lib/reportData";
 import UpdateButton from "@/components/UpdateButton";
+import ReportSummary from "@/components/ReportSummary";
 
 export default async function DashboardPage({
   searchParams,
@@ -13,17 +14,7 @@ export default async function DashboardPage({
   const autoRefresh = connected ? await hasAutoRefresh() : true;
 
   const supabase = await createServerSupabase();
-  const { count: pendentes } = await supabase
-    .from("campaign_decisions")
-    .select("*", { count: "exact", head: true })
-    .eq("status", "pendente")
-    .eq("escolhida", true);
-  const { data: lastDecision } = await supabase
-    .from("campaign_decisions")
-    .select("created_at")
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  const report = await getLatestRunReport(supabase);
 
   return (
     <div className="space-y-8">
@@ -71,27 +62,11 @@ export default async function DashboardPage({
               </a>
             </div>
           )}
-          <div className="mb-4 flex items-center justify-between">
-            <div>
-              <p className="text-sm text-neutral-500">
-                {lastDecision
-                  ? `Última atualização: ${new Date(lastDecision.created_at).toLocaleString("pt-BR")}`
-                  : "Ainda não rodou nenhuma atualização."}
-              </p>
-              <p className="text-sm text-neutral-500">
-                <b>{pendentes ?? 0}</b> decisões pendentes (melhor campanha por item, aguardando revisão).
-              </p>
-            </div>
-            <Link
-              href="/painel"
-              className="rounded-md border border-neutral-300 px-4 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50"
-            >
-              Ver painel de decisões
-            </Link>
-          </div>
           <UpdateButton />
         </div>
       )}
+
+      {connected && <ReportSummary report={report} />}
     </div>
   );
 }
