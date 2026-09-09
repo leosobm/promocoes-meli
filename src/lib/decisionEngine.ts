@@ -155,7 +155,7 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
   // erro) — um .insert() em lote com objetos de chaves diferentes manda
   // NULL explícito pra coluna ausente numas linhas em vez de aplicar o
   // DEFAULT do banco, o que viola a constraint NOT NULL dessas colunas.
-  const base = { run_id: ctx.runId, escolhida: false, gravavel: false, reducao_tarifa: false };
+  const base = { run_id: ctx.runId, escolhida: false, gravavel: false, reducao_tarifa: false, troca: false };
 
   const detail = await ctx.client.getItemDetail(mlb);
   if (!detail) {
