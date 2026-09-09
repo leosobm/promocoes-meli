@@ -1,7 +1,12 @@
+import { redirect } from "next/navigation";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { getCurrentUser } from "@/lib/auth/roles";
 import UploadItemsForm from "@/components/UploadItemsForm";
 
 export default async function ItensPage() {
+  const current = await getCurrentUser();
+  if (current?.role !== "admin") redirect("/");
+
   const supabase = await createServerSupabase();
   const { data: items } = await supabase
     .from("item_config")

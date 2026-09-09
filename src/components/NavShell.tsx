@@ -5,21 +5,24 @@ import { usePathname, useRouter } from "next/navigation";
 import { createBrowserSupabase } from "@/lib/supabase/client";
 
 const LINKS = [
-  { href: "/", label: "Painel" },
-  { href: "/itens", label: "Itens (custo/margem)" },
-  { href: "/historico", label: "Histórico" },
-  { href: "/config", label: "Configurações" },
+  { href: "/", label: "Painel", adminOnly: false },
+  { href: "/itens", label: "Itens (custo/margem)", adminOnly: true },
+  { href: "/historico", label: "Histórico", adminOnly: false },
+  { href: "/config", label: "Configurações", adminOnly: true },
 ];
 
 export default function NavShell({
   userEmail,
+  isAdmin,
   children,
 }: {
   userEmail: string;
+  isAdmin: boolean;
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
   const router = useRouter();
+  const links = LINKS.filter((l) => !l.adminOnly || isAdmin);
 
   async function handleLogout() {
     const supabase = createBrowserSupabase();
@@ -33,7 +36,7 @@ export default function NavShell({
       <header className="border-b border-neutral-200 bg-white">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3">
           <nav className="flex items-center gap-1">
-            {LINKS.map((l) => (
+            {links.map((l) => (
               <Link
                 key={l.href}
                 href={l.href}

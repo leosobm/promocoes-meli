@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import * as XLSX from "xlsx";
 import { z } from "zod";
 import { createServiceSupabase } from "@/lib/supabase/server";
+import { requireAdmin } from "@/lib/auth/requireAdmin";
 
 /**
  * Aceita .csv ou .xlsx com as colunas (nomes flexíveis, ver COLUMN_ALIASES):
@@ -50,6 +51,9 @@ function parseBool(v: unknown): boolean {
 }
 
 export async function POST(request: NextRequest) {
+  const { user, response } = await requireAdmin();
+  if (!user) return response;
+
   const form = await request.formData();
   const file = form.get("file");
   if (!(file instanceof File)) {
