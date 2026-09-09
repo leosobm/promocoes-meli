@@ -63,6 +63,7 @@ export async function POST(request: NextRequest) {
             status: "erro",
             applied_at: new Date().toISOString(),
             motivo: `${d.motivo} | ERRO ao sair da campanha anterior (${d.campanha_anterior_tipo}): ${JSON.stringify(leave.response)}`,
+            resposta_api: leave.response,
           })
           .eq("id", d.id);
         results.push({
@@ -79,17 +80,37 @@ export async function POST(request: NextRequest) {
       offerId: d.offer_id ?? undefined,
     });
 
+    // 2xx não é garantia de que o preço pedido realmente "colou" — visto
+    // na prática: reenviar join pra uma campanha já iniciada pode
+    // responder sucesso sem mudar o preço vigente. Quando a resposta
+    // ecoa um preço, compara com o que foi pedido e avisa se divergir.
+    const respostaPreco = (r.response as Record<string, unknown> | null)?.price;
+    const precoDivergente =
+      r.ok && typeof respostaPreco === "number" && d.preco_proposto != null &&
+      Math.abs(respostaPreco - d.preco_proposto) > 0.01;
+
     const status = r.ok ? "aplicada" : "erro";
+    let motivoFinal = r.ok ? d.motivo : `${d.motivo} | ERRO na gravação: ${JSON.stringify(r.response)}`;
+    if (precoDivergente) {
+      motivoFinal += ` | ATENÇÃO: pedimos R$ ${d.preco_proposto.toFixed(2)}, API confirmou R$ ${Number(respostaPreco).toFixed(2)} — a campanha pode já estar ativa com outro preço e não ter sido atualizada. Confira no painel do ML.`;
+    }
+
     await supabase
       .from("campaign_decisions")
       .update({
         status,
         applied_at: new Date().toISOString(),
-        motivo: r.ok ? d.motivo : `${d.motivo} | ERRO na gravação: ${JSON.stringify(r.response)}`,
+        motivo: motivoFinal,
+        resposta_api: r.response,
       })
       .eq("id", d.id);
 
-    results.push({ id: d.id, mlb: d.mlb, ok: r.ok, detalhe: JSON.stringify(r.response).slice(0, 300) });
+    results.push({
+      id: d.id, mlb: d.mlb, ok: r.ok && !precoDivergente,
+      detalhe: precoDivergente
+        ? `Aplicado mas com preço divergente (pedido R$ ${d.preco_proposto.toFixed(2)}, API confirmou R$ ${Number(respostaPreco).toFixed(2)}) — confira no ML.`
+        : JSON.stringify(r.response).slice(0, 300),
+    });
   }
 
   return NextResponse.json({ results });
