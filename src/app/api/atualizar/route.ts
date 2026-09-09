@@ -1,6 +1,11 @@
 import { runUpdate } from "@/lib/decisionEngine";
 
-export const maxDuration = 300; // segundos — limite da function; ver AVISO no README se o catálogo crescer
+// 60s = teto do plano Hobby da Vercel (conta nova, criada agora). Se o
+// catálogo crescer e a sincronização passar disso, a function é cortada no
+// meio — nesse caso, ou paginamos a atualização em várias chamadas menores,
+// ou fazemos upgrade pro plano Pro (maxDuration até 300s). Ver conversa com
+// o usuário em 2026-09-09 ("me avise para decidirmos").
+export const maxDuration = 60;
 
 /** Rota protegida pelo middleware. Dispara a leitura de campanhas + cálculo
  * de decisões, transmitindo o progresso via Server-Sent Events. NUNCA grava
