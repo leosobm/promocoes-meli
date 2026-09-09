@@ -32,7 +32,7 @@ interface AppSettings {
   peso_margem_pct: number;
 }
 
-interface ItemConfigRow {
+export interface ItemConfigRow {
   mlb: string;
   sku: string; // '' = item sem variação (ou variação não informada)
   cmv: number;
@@ -74,7 +74,7 @@ interface MlbResult {
   escolhidas: number;
 }
 
-interface RunContext {
+export interface RunContext {
   client: MercadoLivreClient;
   userId: number;
   taxasPct: number;
@@ -133,7 +133,7 @@ function extractSku(item: ItemDetail): string | null {
   return fromVariation ?? null;
 }
 
-async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunContext): Promise<MlbResult> {
+export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunContext): Promise<MlbResult> {
   const logs: string[] = [];
   const decisionRows: DecisionInsertRow[] = [];
   // Sempre incluir escolhida/gravavel (mesmo nas saídas antecipadas de
