@@ -53,6 +53,11 @@ function Section({
                   <td className="p-2.5">
                     <div className="font-medium text-neutral-900">{r.mlb}</div>
                     <div className="max-w-[220px] truncate text-xs text-neutral-500">{r.title ?? ""}</div>
+                    {r.troca && (
+                      <div className="mt-0.5 text-xs font-medium text-blue-700">
+                        🔄 Troca: {r.campanha_anterior_tipo} → {r.promotion_type}
+                      </div>
+                    )}
                   </td>
                   <td className="p-2.5">{r.promotion_type}</td>
                   <td className="p-2.5 text-right">{fmtPct(r.margem_calculada_pct)}</td>

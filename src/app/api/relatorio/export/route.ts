@@ -16,6 +16,10 @@ function toSheetRows(rows: DecisionReportRow[]) {
     "Incentivo ML (redução de tarifa)": r.reducao_tarifa ? "Sim" : "Não",
     "Red. Tarifa (%)": r.reducao_tarifa_pct ?? "",
     "Red. Tarifa (R$)": r.reducao_tarifa_valor ?? "",
+    Troca: r.troca ? "Sim" : "Não",
+    "Campanha Anterior": r.campanha_anterior_tipo ?? "",
+    "Margem Anterior (%)": r.campanha_anterior_margem_pct ?? "",
+    "Score Anterior": r.campanha_anterior_score ?? "",
     Score: r.score ?? "",
     Status: r.status,
     Motivo: r.motivo,
@@ -29,6 +33,7 @@ function addSheet(wb: XLSX.WorkBook, name: string, rows: DecisionReportRow[]) {
   ws["!cols"] = [
     { wch: 16 }, { wch: 30 }, { wch: 22 }, { wch: 16 }, { wch: 16 }, { wch: 16 },
     { wch: 12 }, { wch: 12 }, { wch: 22 }, { wch: 14 }, { wch: 14 },
+    { wch: 10 }, { wch: 18 }, { wch: 14 }, { wch: 12 },
     { wch: 10 }, { wch: 12 }, { wch: 50 }, { wch: 20 }, { wch: 20 },
   ];
   XLSX.utils.book_append_sheet(wb, ws, name.slice(0, 31));

@@ -13,6 +13,10 @@ export interface DecisionReportRow {
   reducao_tarifa: boolean;
   reducao_tarifa_pct: number | null;
   reducao_tarifa_valor: number | null;
+  troca: boolean;
+  campanha_anterior_tipo: string | null;
+  campanha_anterior_margem_pct: number | null;
+  campanha_anterior_score: number | null;
   score: number | null;
   motivo: string;
   status: string;
@@ -65,7 +69,7 @@ export async function getLatestRunReport(
   const { data: decisions } = await supabase
     .from("campaign_decisions")
     .select(
-      "id, mlb, promotion_id, promotion_type, preco_proposto, preco_original, margem_calculada_pct, desconto_consumidor_pct, reducao_tarifa, reducao_tarifa_pct, reducao_tarifa_valor, score, motivo, status, escolhida, created_at, applied_at",
+      "id, mlb, promotion_id, promotion_type, preco_proposto, preco_original, margem_calculada_pct, desconto_consumidor_pct, reducao_tarifa, reducao_tarifa_pct, reducao_tarifa_valor, troca, campanha_anterior_tipo, campanha_anterior_margem_pct, campanha_anterior_score, score, motivo, status, escolhida, created_at, applied_at",
     )
     .eq("run_id", runId)
     .order("created_at", { ascending: false });

@@ -19,6 +19,11 @@ export type ProgressEvent =
   | { type: "done"; runId: string; totalDecisions: number; totalEscolhidas: number }
   | { type: "error"; message: string };
 
+// Status da API que significam "o item JÁ está participando desta
+// campanha agora" (não é candidata nem programada) — mesmo bucket
+// "Participando" do mercadolivre_promocoes.py original.
+const ACTIVE_STATUSES = new Set(["accepted", "active", "started", "joined", "in_progress"]);
+
 // Quantos MLBs processar em paralelo — cada um faz ~4 chamadas à API do ML
 // (detalhe do item, comissão, frete grátis, promoções). Sequencial não cabe
 // no limite de tempo de uma function com catálogos grandes (visto na
@@ -61,6 +66,12 @@ interface DecisionInsertRow {
   reducao_tarifa?: boolean;
   reducao_tarifa_pct?: number | null;
   reducao_tarifa_valor?: number | null;
+  troca?: boolean;
+  campanha_anterior_id?: string | null;
+  campanha_anterior_tipo?: string | null;
+  campanha_anterior_offer_id?: string | null;
+  campanha_anterior_margem_pct?: number | null;
+  campanha_anterior_score?: number | null;
   sku_referencia?: string | null;
   variacoes?: VariacaoResultado[] | null;
   score?: number | null;
@@ -299,17 +310,66 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
     ? viaveis.reduce((best, cur) => (cur.score > best.score ? cur : best))
     : null;
 
+  // A campanha em que o item JÁ está participando, lida ao vivo da API
+  // (status "started"/"active"/etc.) — pode ou não ser a mesma que a
+  // melhor pontuação atual. Comparar as duas é o que decide "trocar" ou
+  // "manter".
+  const ativaEntry = evaluated.find((e) => ACTIVE_STATUSES.has((e.promo.status ?? "").toLowerCase())) ?? null;
+
+  let recomendada = melhor;
+  let trocaFlag = false;
+  let switchBlockedReason: string | null = null;
+  if (ativaEntry && melhor && ativaEntry.promo.promotion_id !== melhor.promo.promotion_id) {
+    const cfgAtiva = getCampaignTypeConfig(ativaEntry.promo.promotion_type);
+    if (cfgAtiva.canDeleteAfterActive) {
+      trocaFlag = true; // troca executável: sai da ativa, entra na nova
+    } else if (ativaEntry.rejeitada === null) {
+      // não dá pra sair da ativa (ex.: LIGHTNING/DOD) — mantém, mesmo a
+      // outra pontuando mais.
+      recomendada = ativaEntry;
+      switchBlockedReason =
+        `${melhor.promo.promotion_type} pontuaria mais (${melhor.score.toFixed(1)} x ${ativaEntry.score.toFixed(1)}), ` +
+        `mas não é possível sair de ${ativaEntry.promo.promotion_type} depois de ativa (confirmado na doc oficial) — mantendo a atual.`;
+    }
+    // se a ativa está rejeitada (margem caiu abaixo do mínimo) e não dá
+    // pra sair dela, `recomendada` continua sendo `melhor` (só
+    // informativo — nenhuma gravação possível) e um aviso é anexado na
+    // própria linha da ativa mais abaixo.
+  }
+
   let escolhidas = 0;
   for (const e of evaluated) {
     const typeCfg = getCampaignTypeConfig(e.promo.promotion_type);
-    const isEscolhida = melhor !== null && e.promo.promotion_id === melhor.promo.promotion_id;
+    const isEscolhida = recomendada !== null && e.promo.promotion_id === recomendada.promo.promotion_id;
+    const isAtivaAtual = ativaEntry !== null && e.promo.promotion_id === ativaEntry.promo.promotion_id;
+    const ehTroca = isEscolhida && trocaFlag && isEscolhida && !isAtivaAtual;
     const refTxt = e.skuReferencia ? ` (referência: SKU ${e.skuReferencia}, a de menor margem entre ${rows.length} variação(ões))` : "";
-    const motivo = e.rejeitada
-      ? `Rejeitada: ${e.rejeitada}`
-      : isEscolhida
-        ? `Escolhida: melhor pontuação (${e.score.toFixed(1)}) entre ${viaveis.length} campanha(s) viável(is)${refTxt}` +
-          (typeCfg.writeSupported ? "." : " — tipo sem gravação automática habilitada; aplique manualmente pelo painel do ML.")
-        : `Válida (margem ${(e.margemPct * 100).toFixed(1)}%${refTxt}) mas superada por outra campanha com pontuação maior (${melhor?.score.toFixed(1)}).`;
+
+    let motivo: string;
+    if (e.rejeitada) {
+      motivo = `Rejeitada: ${e.rejeitada}`;
+      if (isAtivaAtual && ativaEntry && !getCampaignTypeConfig(ativaEntry.promo.promotion_type).canDeleteAfterActive) {
+        motivo += ` ATENÇÃO: esta campanha está ATIVA e não pode ser removida automaticamente (tipo não permite sair depois de ativa) — revise manualmente no painel do Mercado Livre.`;
+      }
+    } else if (ehTroca) {
+      const deltaMargem = (e.margemPct - ativaEntry!.margemPct) * 100;
+      const deltaDesconto = (e.descontoPct - ativaEntry!.descontoPct) * 100;
+      motivo =
+        `Troca recomendada: sair de ${ativaEntry!.promo.promotion_type} (margem ${(ativaEntry!.margemPct * 100).toFixed(1)}%, ` +
+        `desconto ${(ativaEntry!.descontoPct * 100).toFixed(1)}%, score ${ativaEntry!.score.toFixed(1)}) e entrar em ${e.promo.promotion_type} ` +
+        `(margem ${(e.margemPct * 100).toFixed(1)}%, desconto ${(e.descontoPct * 100).toFixed(1)}%, score ${e.score.toFixed(1)}) — ` +
+        `margem ${deltaMargem >= 0 ? "+" : ""}${deltaMargem.toFixed(1)}pp, desconto ${deltaDesconto >= 0 ? "+" : ""}${deltaDesconto.toFixed(1)}pp.${refTxt}`;
+    } else if (isEscolhida && isAtivaAtual && switchBlockedReason) {
+      motivo = `Mantida (troca bloqueada): ${switchBlockedReason}${refTxt}`;
+    } else if (isEscolhida && isAtivaAtual) {
+      motivo = `Mantida: já é a melhor campanha disponível (score ${e.score.toFixed(1)})${refTxt} — nenhuma troca necessária.`;
+    } else if (isEscolhida) {
+      motivo =
+        `Escolhida: melhor pontuação (${e.score.toFixed(1)}) entre ${viaveis.length} campanha(s) viável(is)${refTxt}` +
+        (typeCfg.writeSupported ? "." : " — tipo sem gravação automática habilitada; aplique manualmente pelo painel do ML.");
+    } else {
+      motivo = `Válida (margem ${(e.margemPct * 100).toFixed(1)}%${refTxt}) mas superada por outra campanha com pontuação maior (${recomendada?.score.toFixed(1)}).`;
+    }
 
     decisionRows.push({
       ...base,
@@ -329,11 +389,17 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
         e.promo.discount_meli_boost_amount != null,
       reducao_tarifa_pct: e.promo.discount_meli_boosted_percentage ?? null,
       reducao_tarifa_valor: e.promo.discount_meli_boost_amount ?? null,
+      troca: ehTroca,
+      campanha_anterior_id: ehTroca ? ativaEntry!.promo.promotion_id : null,
+      campanha_anterior_tipo: ehTroca ? ativaEntry!.promo.promotion_type : null,
+      campanha_anterior_offer_id: ehTroca ? ativaEntry!.promo.offer_id ?? null : null,
+      campanha_anterior_margem_pct: ehTroca ? ativaEntry!.margemPct * 100 : null,
+      campanha_anterior_score: ehTroca ? ativaEntry!.score : null,
       sku_referencia: e.skuReferencia,
       variacoes: e.variacoes,
       score: e.score,
       escolhida: isEscolhida,
-      gravavel: isEscolhida && typeCfg.writeSupported,
+      gravavel: isEscolhida && !isAtivaAtual && typeCfg.writeSupported,
       motivo,
       status: e.rejeitada ? "rejeitada" : "pendente",
     });

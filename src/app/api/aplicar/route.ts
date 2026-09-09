@@ -48,6 +48,31 @@ export async function POST(request: NextRequest) {
       });
       continue;
     }
+    // Troca: sai da campanha anterior ANTES de entrar na nova — não tenta
+    // aderir com a antiga ainda ativa (payload errado poderia fixar preço
+    // promocional incorreto num item que já está com outro preço vigente).
+    if (d.troca && d.campanha_anterior_id) {
+      const leave = await client.leaveItem(d.mlb, d.campanha_anterior_id, d.campanha_anterior_tipo, {
+        offerId: d.campanha_anterior_offer_id ?? undefined,
+        currentStatus: "active",
+      });
+      if (!leave.ok) {
+        await supabase
+          .from("campaign_decisions")
+          .update({
+            status: "erro",
+            applied_at: new Date().toISOString(),
+            motivo: `${d.motivo} | ERRO ao sair da campanha anterior (${d.campanha_anterior_tipo}): ${JSON.stringify(leave.response)}`,
+          })
+          .eq("id", d.id);
+        results.push({
+          id: d.id, mlb: d.mlb, ok: false,
+          detalhe: `Falha ao sair de ${d.campanha_anterior_tipo} — troca cancelada, novo join não foi tentado.`,
+        });
+        continue;
+      }
+    }
+
     const typeCfg = getCampaignTypeConfig(d.promotion_type);
     const r = await client.joinItem(d.mlb, d.promotion_id, d.promotion_type, {
       dealPrice: typeCfg.priceMode === "seller_defined" ? d.preco_proposto ?? undefined : undefined,

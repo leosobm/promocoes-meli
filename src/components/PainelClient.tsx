@@ -17,6 +17,10 @@ export interface DecisionRow {
   reducao_tarifa: boolean;
   reducao_tarifa_pct: number | null;
   reducao_tarifa_valor: number | null;
+  troca: boolean;
+  campanha_anterior_tipo: string | null;
+  campanha_anterior_margem_pct: number | null;
+  campanha_anterior_score: number | null;
   sku_referencia: string | null;
   score: number | null;
   gravavel: boolean;
@@ -143,6 +147,16 @@ export default function PainelClient({ rows }: { rows: DecisionRow[] }) {
                     <div className="max-w-xs truncate text-xs text-neutral-500">{r.title ?? r.sku ?? ""}</div>
                     {r.sku_referencia && (
                       <div className="text-xs text-amber-700">SKU ref.: {r.sku_referencia}</div>
+                    )}
+                    {r.troca && (
+                      <div className="text-xs font-medium text-blue-700">
+                        🔄 Troca: {r.campanha_anterior_tipo} → {r.promotion_type}
+                        {r.campanha_anterior_margem_pct != null && (
+                          <span className="text-neutral-500">
+                            {" "}(margem {fmtPct(r.campanha_anterior_margem_pct)} → {fmtPct(r.margem_calculada_pct)})
+                          </span>
+                        )}
+                      </div>
                     )}
                   </td>
                   <td className="p-3">{r.promotion_type}</td>

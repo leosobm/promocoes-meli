@@ -18,7 +18,7 @@ export default async function HistoricoPage() {
   const supabase = await createServerSupabase();
   const { data: decisions } = await supabase
     .from("campaign_decisions")
-    .select("id, mlb, promotion_type, preco_proposto, margem_calculada_pct, reducao_tarifa, reducao_tarifa_valor, status, motivo, created_at, applied_at")
+    .select("id, mlb, promotion_type, preco_proposto, margem_calculada_pct, reducao_tarifa, reducao_tarifa_valor, troca, campanha_anterior_tipo, status, motivo, created_at, applied_at")
     .neq("status", "pendente")
     .order("created_at", { ascending: false })
     .limit(500);
@@ -52,7 +52,12 @@ export default async function HistoricoPage() {
                   {new Date(d.applied_at ?? d.created_at).toLocaleString("pt-BR")}
                 </td>
                 <td className="p-3 font-medium">{d.mlb}</td>
-                <td className="p-3">{d.promotion_type}</td>
+                <td className="p-3">
+                  {d.promotion_type}
+                  {d.troca && (
+                    <div className="text-xs font-medium text-blue-700">🔄 de {d.campanha_anterior_tipo}</div>
+                  )}
+                </td>
                 <td className="p-3 text-right">{d.preco_proposto ? `R$ ${d.preco_proposto.toFixed(2)}` : "-"}</td>
                 <td className="p-3 text-right">
                   {d.margem_calculada_pct != null ? `${d.margem_calculada_pct.toFixed(1)}%` : "-"}
