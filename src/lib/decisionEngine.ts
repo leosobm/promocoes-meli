@@ -136,7 +136,11 @@ function extractSku(item: ItemDetail): string | null {
 async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunContext): Promise<MlbResult> {
   const logs: string[] = [];
   const decisionRows: DecisionInsertRow[] = [];
-  const base = { run_id: ctx.runId };
+  // Sempre incluir escolhida/gravavel (mesmo nas saídas antecipadas de
+  // erro) — um .insert() em lote com objetos de chaves diferentes manda
+  // NULL explícito pra coluna ausente numas linhas em vez de aplicar o
+  // DEFAULT do banco, o que viola a constraint NOT NULL dessas colunas.
+  const base = { run_id: ctx.runId, escolhida: false, gravavel: false };
 
   const detail = await ctx.client.getItemDetail(mlb);
   if (!detail) {
