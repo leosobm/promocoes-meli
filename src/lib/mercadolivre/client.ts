@@ -180,16 +180,28 @@ export class MercadoLivreClient {
    * campanhas (candidatas e ativas) daquele MLB, já com price/original_price
    * e os campos de boost resolvidos. Preferir a este endpoint a enumerar
    * item por item dentro de cada campanha.
+   *
+   * ATENÇÃO: esse endpoint identifica a promoção com os campos `id` e
+   * `type` (confirmado na doc oficial, ex.: {"id":"C-MLB13967","type":
+   * "SELLER_COUPON_CAMPAIGN",...}) — DIFERENTE de `promotion_id`/
+   * `promotion_type`, que é como o resto da API (join/campanhas por id)
+   * chama a mesma coisa. Mapear explicitamente aqui em vez de assumir os
+   * nomes de campo do join payload.
    */
   async getItemPromotions(itemId: string): Promise<ItemPromotion[]> {
-    const { status, data } = await this.request<{ results?: ItemPromotion[] } | ItemPromotion[]>(
-      "GET",
-      `/seller-promotions/items/${itemId}`,
-      { params: { app_version: "v2" } },
-    );
+    const { status, data } = await this.request<
+      { results?: Record<string, unknown>[] } | Record<string, unknown>[]
+    >("GET", `/seller-promotions/items/${itemId}`, { params: { app_version: "v2" } });
     if (status !== 200) return [];
     const list = Array.isArray(data) ? data : data.results ?? [];
-    return list.map((p) => ({ ...p, raw: p }));
+    return list
+      .map((p): ItemPromotion | null => {
+        const promotionId = (p.promotion_id ?? p.id) as string | undefined;
+        const promotionType = (p.promotion_type ?? p.type) as string | undefined;
+        if (!promotionId || !promotionType) return null; // sem os dois, não dá pra identificar a promoção com segurança
+        return { ...(p as object), promotion_id: promotionId, promotion_type: promotionType, raw: p };
+      })
+      .filter((p): p is ItemPromotion => p !== null);
   }
 
   /**
