@@ -39,6 +39,7 @@ function Section({
                 <th className="p-2.5">MLB / Título</th>
                 <th className="p-2.5">Campanha</th>
                 <th className="p-2.5 text-right">Margem</th>
+                <th className="p-2.5 text-right">Red. tarifa</th>
                 {showApplied ? (
                   <th className="p-2.5">Aplicada em</th>
                 ) : (
@@ -55,6 +56,13 @@ function Section({
                   </td>
                   <td className="p-2.5">{r.promotion_type}</td>
                   <td className="p-2.5 text-right">{fmtPct(r.margem_calculada_pct)}</td>
+                  <td className="p-2.5 text-right">
+                    {r.reducao_tarifa ? (
+                      <span className="text-green-700">{fmtMoney(r.reducao_tarifa_valor)}</span>
+                    ) : (
+                      <span className="text-neutral-400">-</span>
+                    )}
+                  </td>
                   {showApplied ? (
                     <td className="p-2.5 text-xs text-neutral-500">
                       {r.applied_at ? new Date(r.applied_at).toLocaleString("pt-BR") : "-"}

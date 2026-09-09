@@ -13,6 +13,9 @@ function toSheetRows(rows: DecisionReportRow[]) {
     "Preço Proposto (R$)": r.preco_proposto ?? "",
     "Desconto (%)": r.desconto_consumidor_pct ?? "",
     "Margem (%)": r.margem_calculada_pct ?? "",
+    "Incentivo ML (redução de tarifa)": r.reducao_tarifa ? "Sim" : "Não",
+    "Red. Tarifa (%)": r.reducao_tarifa_pct ?? "",
+    "Red. Tarifa (R$)": r.reducao_tarifa_valor ?? "",
     Score: r.score ?? "",
     Status: r.status,
     Motivo: r.motivo,
@@ -25,7 +28,8 @@ function addSheet(wb: XLSX.WorkBook, name: string, rows: DecisionReportRow[]) {
   const ws = XLSX.utils.json_to_sheet(toSheetRows(rows));
   ws["!cols"] = [
     { wch: 16 }, { wch: 30 }, { wch: 22 }, { wch: 16 }, { wch: 16 }, { wch: 16 },
-    { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 50 }, { wch: 20 }, { wch: 20 },
+    { wch: 12 }, { wch: 12 }, { wch: 22 }, { wch: 14 }, { wch: 14 },
+    { wch: 10 }, { wch: 12 }, { wch: 50 }, { wch: 20 }, { wch: 20 },
   ];
   XLSX.utils.book_append_sheet(wb, ws, name.slice(0, 31));
 }

@@ -9,7 +9,7 @@ export default async function PainelPage() {
   const query = supabase
     .from("campaign_decisions")
     .select(
-      "id, mlb, promotion_id, promotion_type, preco_proposto, preco_original, margem_calculada_pct, desconto_consumidor_pct, ml_participacao_pct, ml_participacao_fonte, sku_referencia, score, gravavel, motivo, status, created_at",
+      "id, mlb, promotion_id, promotion_type, preco_proposto, preco_original, margem_calculada_pct, desconto_consumidor_pct, ml_participacao_pct, ml_participacao_fonte, reducao_tarifa, reducao_tarifa_pct, reducao_tarifa_valor, sku_referencia, score, gravavel, motivo, status, created_at",
     )
     .eq("escolhida", true)
     .eq("status", "pendente")

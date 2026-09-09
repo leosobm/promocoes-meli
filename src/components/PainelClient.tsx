@@ -14,6 +14,9 @@ export interface DecisionRow {
   desconto_consumidor_pct: number | null;
   ml_participacao_pct: number | null;
   ml_participacao_fonte: string | null;
+  reducao_tarifa: boolean;
+  reducao_tarifa_pct: number | null;
+  reducao_tarifa_valor: number | null;
   sku_referencia: string | null;
   score: number | null;
   gravavel: boolean;
@@ -29,6 +32,19 @@ function fmtPct(v: number | null) {
 }
 function fmtMoney(v: number | null) {
   return v == null ? "-" : `R$ ${v.toFixed(2)}`;
+}
+
+function IncentivoMlCell({ row }: { row: DecisionRow }) {
+  if (!row.reducao_tarifa) return <span className="text-neutral-400">Não</span>;
+  return (
+    <div>
+      <span className="font-medium text-green-700">Sim</span>
+      <div className="text-xs text-neutral-500">
+        {fmtMoney(row.reducao_tarifa_valor)}
+        {row.reducao_tarifa_pct != null ? ` (${row.reducao_tarifa_pct.toFixed(1)}%)` : ""}
+      </div>
+    </div>
+  );
 }
 
 export default function PainelClient({ rows }: { rows: DecisionRow[] }) {
@@ -111,6 +127,7 @@ export default function PainelClient({ rows }: { rows: DecisionRow[] }) {
                 <th className="p-3 text-right">Desconto</th>
                 <th className="p-3 text-right">Margem</th>
                 <th className="p-3 text-right">Part. ML</th>
+                <th className="p-3">Incentivo ML (tarifa)</th>
                 <th className="p-3 text-right">Score</th>
                 <th className="p-3">Motivo</th>
               </tr>
@@ -133,6 +150,9 @@ export default function PainelClient({ rows }: { rows: DecisionRow[] }) {
                   <td className="p-3 text-right">{fmtPct(r.desconto_consumidor_pct)}</td>
                   <td className="p-3 text-right">{fmtPct(r.margem_calculada_pct)}</td>
                   <td className="p-3 text-right">{fmtPct(r.ml_participacao_pct)}</td>
+                  <td className="p-3">
+                    <IncentivoMlCell row={r} />
+                  </td>
                   <td className="p-3 text-right">{r.score?.toFixed(1) ?? "-"}</td>
                   <td className="max-w-xs p-3 text-xs text-neutral-600">{r.motivo}</td>
                 </tr>
@@ -167,6 +187,7 @@ export default function PainelClient({ rows }: { rows: DecisionRow[] }) {
                   <th className="p-3">MLB / Título</th>
                   <th className="p-3">Campanha</th>
                   <th className="p-3 text-right">Margem</th>
+                  <th className="p-3">Incentivo ML (tarifa)</th>
                   <th className="p-3">Motivo</th>
                 </tr>
               </thead>
@@ -179,6 +200,9 @@ export default function PainelClient({ rows }: { rows: DecisionRow[] }) {
                     </td>
                     <td className="p-3">{r.promotion_type}</td>
                     <td className="p-3 text-right">{fmtPct(r.margem_calculada_pct)}</td>
+                    <td className="p-3">
+                      <IncentivoMlCell row={r} />
+                    </td>
                     <td className="max-w-xs p-3 text-xs text-neutral-600">{r.motivo}</td>
                   </tr>
                 ))}

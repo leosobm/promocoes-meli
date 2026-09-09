@@ -57,6 +57,9 @@ interface DecisionInsertRow {
   desconto_consumidor_pct?: number | null;
   ml_participacao_pct?: number | null;
   ml_participacao_fonte?: string | null;
+  reducao_tarifa?: boolean;
+  reducao_tarifa_pct?: number | null;
+  reducao_tarifa_valor?: number | null;
   sku_referencia?: string | null;
   variacoes?: VariacaoResultado[] | null;
   score?: number | null;
@@ -140,7 +143,7 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
   // erro) — um .insert() em lote com objetos de chaves diferentes manda
   // NULL explícito pra coluna ausente numas linhas em vez de aplicar o
   // DEFAULT do banco, o que viola a constraint NOT NULL dessas colunas.
-  const base = { run_id: ctx.runId, escolhida: false, gravavel: false };
+  const base = { run_id: ctx.runId, escolhida: false, gravavel: false, reducao_tarifa: false };
 
   const detail = await ctx.client.getItemDetail(mlb);
   if (!detail) {
@@ -319,6 +322,12 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
       desconto_consumidor_pct: e.descontoPct * 100,
       ml_participacao_pct: e.mlPct != null ? e.mlPct * 100 : null,
       ml_participacao_fonte: e.mlFonte,
+      reducao_tarifa:
+        !!e.promo.boosted_offer ||
+        e.promo.discount_meli_boosted_percentage != null ||
+        e.promo.discount_meli_boost_amount != null,
+      reducao_tarifa_pct: e.promo.discount_meli_boosted_percentage ?? null,
+      reducao_tarifa_valor: e.promo.discount_meli_boost_amount ?? null,
       sku_referencia: e.skuReferencia,
       variacoes: e.variacoes,
       score: e.score,

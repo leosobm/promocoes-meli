@@ -18,7 +18,7 @@ export default async function HistoricoPage() {
   const supabase = await createServerSupabase();
   const { data: decisions } = await supabase
     .from("campaign_decisions")
-    .select("id, mlb, promotion_type, preco_proposto, margem_calculada_pct, status, motivo, created_at, applied_at")
+    .select("id, mlb, promotion_type, preco_proposto, margem_calculada_pct, reducao_tarifa, reducao_tarifa_valor, status, motivo, created_at, applied_at")
     .neq("status", "pendente")
     .order("created_at", { ascending: false })
     .limit(500);
@@ -40,6 +40,7 @@ export default async function HistoricoPage() {
               <th className="p-3">Campanha</th>
               <th className="p-3 text-right">Preço</th>
               <th className="p-3 text-right">Margem</th>
+              <th className="p-3 text-right">Red. tarifa</th>
               <th className="p-3">Status</th>
               <th className="p-3">Motivo</th>
             </tr>
@@ -56,6 +57,13 @@ export default async function HistoricoPage() {
                 <td className="p-3 text-right">
                   {d.margem_calculada_pct != null ? `${d.margem_calculada_pct.toFixed(1)}%` : "-"}
                 </td>
+                <td className="p-3 text-right">
+                  {d.reducao_tarifa ? (
+                    <span className="text-green-700">R$ {(d.reducao_tarifa_valor ?? 0).toFixed(2)}</span>
+                  ) : (
+                    <span className="text-neutral-400">-</span>
+                  )}
+                </td>
                 <td className="p-3">
                   <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLOR[d.status] ?? ""}`}>
                     {STATUS_LABEL[d.status] ?? d.status}
@@ -66,7 +74,7 @@ export default async function HistoricoPage() {
             ))}
             {(decisions ?? []).length === 0 && (
               <tr>
-                <td colSpan={7} className="p-6 text-center text-neutral-500">
+                <td colSpan={8} className="p-6 text-center text-neutral-500">
                   Nada no histórico ainda.
                 </td>
               </tr>
