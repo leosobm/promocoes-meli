@@ -503,15 +503,27 @@ export async function* runUpdate(resumeRunId?: string): AsyncGenerator<ProgressE
   };
   const taxasPct = settings.taxas_pct / 100;
 
-  const { data: itemConfigs, error: icErr } = await supabase
-    .from("item_config")
-    .select("mlb, sku, cmv, margem_minima_pct, margem_alvo_pct")
-    .eq("participar_campanhas", true);
-  if (icErr) {
-    yield { type: "error", message: `Falha ao ler item_config: ${icErr.message}` };
-    return;
+  // O Supabase/PostgREST limita cada resposta a 1000 linhas por padrão —
+  // sem paginação explícita, um catálogo grande (visto na prática: 2891
+  // itens) tem a maior parte silenciosamente ignorada, sem erro nenhum.
+  // Pagina em blocos de 1000 com ORDER BY estável (mlb, sku) até esgotar.
+  const allRows: ItemConfigRow[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data: page, error: icErr } = await supabase
+      .from("item_config")
+      .select("mlb, sku, cmv, margem_minima_pct, margem_alvo_pct")
+      .eq("participar_campanhas", true)
+      .order("mlb", { ascending: true })
+      .order("sku", { ascending: true })
+      .range(from, from + 999);
+    if (icErr) {
+      yield { type: "error", message: `Falha ao ler item_config: ${icErr.message}` };
+      return;
+    }
+    if (!page || page.length === 0) break;
+    allRows.push(...(page as ItemConfigRow[]));
+    if (page.length < 1000) break;
   }
-  const allRows = (itemConfigs ?? []) as ItemConfigRow[];
   if (allRows.length === 0) {
     yield { type: "error", message: "Nenhum item cadastrado em item_config (ou todos com participar_campanhas=false)." };
     return;
@@ -527,11 +539,21 @@ export async function* runUpdate(resumeRunId?: string): AsyncGenerator<ProgressE
   const runId = resumeRunId ?? randomUUID();
   let jaProcessados = new Set<string>();
   if (resumeRunId) {
-    const { data: done } = await supabase
-      .from("campaign_decisions")
-      .select("mlb")
-      .eq("run_id", resumeRunId);
-    jaProcessados = new Set((done ?? []).map((d) => d.mlb));
+    // Mesmo problema do fetch de item_config: uma rodada grande gera muito
+    // mais de 1000 linhas em campaign_decisions (várias por MLB) — sem
+    // paginar, a maioria dos MLBs já processados não aparecia aqui, e a
+    // função tentava reprocessar (e duplicar decisões para) itens que já
+    // tinham acabado de ser calculados nesta mesma rodada.
+    for (let from = 0; ; from += 1000) {
+      const { data: page } = await supabase
+        .from("campaign_decisions")
+        .select("mlb")
+        .eq("run_id", resumeRunId)
+        .range(from, from + 999);
+      if (!page || page.length === 0) break;
+      for (const d of page) jaProcessados.add(d.mlb);
+      if (page.length < 1000) break;
+    }
     yield {
       type: "log",
       message: `Retomando rodada ${resumeRunId} — ${jaProcessados.size}/${totalMlbs} MLBs já processados.`,

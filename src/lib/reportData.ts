@@ -1,5 +1,23 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+/** O Supabase/PostgREST limita cada resposta a 1000 linhas por padrão — sem
+ * paginar, uma rodada grande (catálogo com milhares de itens, várias
+ * decisões por item) tinha a maior parte dos dados silenciosamente
+ * cortada. Busca em blocos de 1000 até esgotar. */
+export async function fetchAllPages<T>(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  query: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>,
+): Promise<T[]> {
+  const all: T[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data } = await query(from, from + 999);
+    if (!data || data.length === 0) break;
+    all.push(...data);
+    if (data.length < 1000) break;
+  }
+  return all;
+}
+
 export interface DecisionReportRow {
   id: string;
   mlb: string;
@@ -66,15 +84,16 @@ export async function getLatestRunReport(
     return { runId: null, createdAt: null, totalItens: 0, aderido: [], naoAderido: [], paraRevisao: [] };
   }
 
-  const { data: decisions } = await supabase
-    .from("campaign_decisions")
-    .select(
-      "id, mlb, promotion_id, promotion_type, preco_proposto, preco_original, margem_calculada_pct, desconto_consumidor_pct, reducao_tarifa, reducao_tarifa_pct, reducao_tarifa_valor, troca, campanha_anterior_tipo, campanha_anterior_margem_pct, campanha_anterior_score, score, motivo, status, escolhida, created_at, applied_at",
-    )
-    .eq("run_id", runId)
-    .order("created_at", { ascending: false });
-
-  const rows = decisions ?? [];
+  const rows = await fetchAllPages<Omit<DecisionReportRow, "title"> & { escolhida: boolean }>((from, to) =>
+    supabase
+      .from("campaign_decisions")
+      .select(
+        "id, mlb, promotion_id, promotion_type, preco_proposto, preco_original, margem_calculada_pct, desconto_consumidor_pct, reducao_tarifa, reducao_tarifa_pct, reducao_tarifa_valor, troca, campanha_anterior_tipo, campanha_anterior_margem_pct, campanha_anterior_score, score, motivo, status, escolhida, created_at, applied_at",
+      )
+      .eq("run_id", runId)
+      .order("created_at", { ascending: false })
+      .range(from, to),
+  );
   const byMlb = new Map<string, typeof rows>();
   for (const r of rows) {
     if (!byMlb.has(r.mlb)) byMlb.set(r.mlb, []);
@@ -82,10 +101,12 @@ export async function getLatestRunReport(
   }
 
   const mlbs = [...byMlb.keys()];
-  const { data: itemsCache } = mlbs.length
-    ? await supabase.from("items_cache").select("mlb, title").in("mlb", mlbs)
-    : { data: [] };
-  const titleByMlb = new Map((itemsCache ?? []).map((i) => [i.mlb, i.title as string | null]));
+  const itemsCache = mlbs.length
+    ? await fetchAllPages<{ mlb: string; title: string | null }>((from, to) =>
+        supabase.from("items_cache").select("mlb, title").in("mlb", mlbs).range(from, to),
+      )
+    : [];
+  const titleByMlb = new Map(itemsCache.map((i) => [i.mlb, i.title]));
 
   const aderido: DecisionReportRow[] = [];
   const naoAderido: DecisionReportRow[] = [];
