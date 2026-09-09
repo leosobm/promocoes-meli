@@ -58,7 +58,7 @@ export async function POST(request: NextRequest) {
   const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
 
   const errors: { linha: number; erro: string }[] = [];
-  const validRows: z.infer<typeof ROW_SCHEMA>[] = [];
+  const validRows: { linha: number; data: z.infer<typeof ROW_SCHEMA> }[] = [];
 
   rawRows.forEach((raw, idx) => {
     const mapped: Record<string, unknown> = {};
@@ -77,7 +77,7 @@ export async function POST(request: NextRequest) {
       errors.push({ linha: idx + 2, erro: parsed.error.issues.map((i) => i.message).join("; ") });
       return;
     }
-    validRows.push(parsed.data);
+    validRows.push({ linha: idx + 2, data: parsed.data });
   });
 
   if (validRows.length === 0) {
@@ -87,9 +87,28 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Postgres rejeita upsert em lote com o mesmo valor de conflito (mlb)
+  // repetido na mesma chamada ("ON CONFLICT DO UPDATE command cannot affect
+  // row a second time") — se o arquivo tiver o mesmo MLB em mais de uma
+  // linha, mantém só a ÚLTIMA ocorrência (linha mais abaixo na planilha
+  // "vence") e avisa nos warnings quais linhas foram descartadas por isso.
+  const byMlb = new Map<string, { linha: number; data: z.infer<typeof ROW_SCHEMA> }>();
+  const duplicatas: { linha: number; erro: string }[] = [];
+  for (const row of validRows) {
+    const anterior = byMlb.get(row.data.mlb);
+    if (anterior) {
+      duplicatas.push({
+        linha: anterior.linha,
+        erro: `MLB ${anterior.data.mlb} duplicado no arquivo — usada a linha ${row.linha} (mais abaixo), esta foi ignorada.`,
+      });
+    }
+    byMlb.set(row.data.mlb, row);
+  }
+  const dedupedRows = [...byMlb.values()].map((r) => r.data);
+
   const supabase = createServiceSupabase();
   const { error } = await supabase.from("item_config").upsert(
-    validRows.map((r) => ({
+    dedupedRows.map((r) => ({
       mlb: r.mlb,
       sku: r.sku ?? null,
       cmv: r.cmv,
@@ -102,5 +121,5 @@ export async function POST(request: NextRequest) {
   );
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  return NextResponse.json({ imported: validRows.length, errors });
+  return NextResponse.json({ imported: dedupedRows.length, errors: [...errors, ...duplicatas] });
 }
