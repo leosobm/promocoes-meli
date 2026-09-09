@@ -12,6 +12,12 @@ const STATUS_CHIP: Record<Status, { text: string; className: string; dot: string
   erro: { text: "Atualização com erro", className: "bg-red-50 text-red-700", dot: "bg-red-500" },
 };
 
+interface StreamOutcome {
+  hadError: boolean;
+  partial: { runId: string } | null;
+  done: { totalDecisions: number; totalEscolhidas: number } | null;
+}
+
 export default function UpdateButton() {
   const router = useRouter();
   const [status, setStatus] = useState<Status>("idle");
@@ -20,44 +26,84 @@ export default function UpdateButton() {
   const [summary, setSummary] = useState<string | null>(null);
   const [showLogs, setShowLogs] = useState(false);
 
+  async function runOnce(runId?: string): Promise<StreamOutcome> {
+    const resp = await fetch("/api/atualizar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(runId ? { runId } : {}),
+    });
+    if (!resp.body) throw new Error("Resposta sem corpo (stream).");
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    const outcome: StreamOutcome = { hadError: false, partial: null, done: null };
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split("\n\n");
+      buffer = parts.pop() ?? "";
+      for (const part of parts) {
+        const line = part.replace(/^data: /, "").trim();
+        if (!line) continue;
+        const evt = JSON.parse(line);
+        if (evt.type === "log") setLogs((l) => [...l, evt.message]);
+        if (evt.type === "progress") setProgress({ done: evt.done, total: evt.total });
+        if (evt.type === "partial") {
+          setProgress({ done: evt.done, total: evt.total });
+          outcome.partial = { runId: evt.runId };
+        }
+        if (evt.type === "error") {
+          outcome.hadError = true;
+          setLogs((l) => [...l, `ERRO: ${evt.message}`]);
+          setSummary(evt.message);
+        }
+        if (evt.type === "done") {
+          outcome.done = { totalDecisions: evt.totalDecisions, totalEscolhidas: evt.totalEscolhidas };
+        }
+      }
+    }
+    return outcome;
+  }
+
   async function handleClick() {
     setStatus("rodando");
     setLogs([]);
     setProgress(null);
     setSummary(null);
     try {
-      const resp = await fetch("/api/atualizar", { method: "POST" });
-      if (!resp.body) throw new Error("Resposta sem corpo (stream).");
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let hadError = false;
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const parts = buffer.split("\n\n");
-        buffer = parts.pop() ?? "";
-        for (const part of parts) {
-          const line = part.replace(/^data: /, "").trim();
-          if (!line) continue;
-          const evt = JSON.parse(line);
-          if (evt.type === "log") setLogs((l) => [...l, evt.message]);
-          if (evt.type === "progress") setProgress({ done: evt.done, total: evt.total });
-          if (evt.type === "error") {
-            hadError = true;
-            setLogs((l) => [...l, `ERRO: ${evt.message}`]);
-            setSummary(evt.message);
-          }
-          if (evt.type === "done") {
-            setSummary(
-              `${evt.totalDecisions} decisões calculadas — ${evt.totalEscolhidas} campanha(s) escolhida(s) pra revisar.`,
-            );
-          }
+      let runId: string | undefined;
+      for (let hop = 0; hop < 50; hop++) {
+        // 50 chamadas encadeadas cobrem catálogos bem grandes (cada uma
+        // processa ~10-15 min de catálogo em ~45s) — trava de segurança
+        // contra loop infinito, não um limite esperado na prática.
+        const outcome = await runOnce(runId);
+        if (outcome.hadError) {
+          setStatus("erro");
+          return;
         }
+        if (outcome.partial) {
+          runId = outcome.partial.runId;
+          setLogs((l) => [...l, `Continuando automaticamente (parte ${hop + 2})...`]);
+          continue;
+        }
+        if (outcome.done) {
+          setSummary(
+            `${outcome.done.totalDecisions} decisões calculadas — ${outcome.done.totalEscolhidas} campanha(s) escolhida(s) pra revisar.`,
+          );
+          setStatus("concluido");
+          router.refresh();
+          return;
+        }
+        // stream terminou sem "done" nem "partial" nem "error" — não deveria
+        // acontecer, mas evita loop preso.
+        setStatus("erro");
+        setSummary("A atualização parou de forma inesperada (sem confirmação de conclusão).");
+        return;
       }
-      setStatus(hadError ? "erro" : "concluido");
-      router.refresh();
+      setStatus("erro");
+      setSummary("Atualização não terminou depois de várias tentativas — catálogo grande demais para o limite atual, ou algo travando. Veja os logs.");
     } catch (e) {
       setLogs((l) => [...l, `ERRO: ${e instanceof Error ? e.message : String(e)}`]);
       setStatus("erro");

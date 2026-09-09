@@ -15,6 +15,7 @@ import type { ItemDetail, ItemPromotion } from "@/lib/mercadolivre/types";
 export type ProgressEvent =
   | { type: "log"; message: string }
   | { type: "progress"; done: number; total: number }
+  | { type: "partial"; runId: string; done: number; total: number }
   | { type: "done"; runId: string; totalDecisions: number; totalEscolhidas: number }
   | { type: "error"; message: string };
 
@@ -342,7 +343,19 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
   return { decisionRows, itemsCacheRow, logs, escolhidas };
 }
 
-export async function* runUpdate(): AsyncGenerator<ProgressEvent> {
+// Orçamento de tempo por invocação — bem abaixo do maxDuration=60s da
+// function (ver route.ts), com folga pra leitura inicial e resposta final.
+// Catálogos grandes (visto na prática: quase 3 mil MLBs) não cabem numa
+// invocação só — ao estourar o orçamento, a função para de propósito e
+// devolve um evento "partial"; quem chama (UpdateButton) reconecta com o
+// mesmo runId pra continuar de onde parou, em vez de a function ser
+// cortada no meio silenciosamente (que é o que acontecia antes: MLBs que
+// não coubessem no tempo simplesmente não ganhavam decisão nenhuma, sem
+// nenhum aviso).
+const TIME_BUDGET_MS = 45_000;
+
+export async function* runUpdate(resumeRunId?: string): AsyncGenerator<ProgressEvent> {
+  const startedAt = Date.now();
   const supabase = createServiceSupabase();
 
   const { data: settingsRow } = await supabase
@@ -377,21 +390,41 @@ export async function* runUpdate(): AsyncGenerator<ProgressEvent> {
     if (!byMlb.has(row.mlb)) byMlb.set(row.mlb, []);
     byMlb.get(row.mlb)!.push(row);
   }
-  const mlbs = [...byMlb.keys()];
+  const totalMlbs = byMlb.size;
 
-  yield {
-    type: "log",
-    message: `${mlbs.length} MLBs configurados (${allRows.length} linhas / variações no total). Conectando ao Mercado Livre...`,
-  };
+  const runId = resumeRunId ?? randomUUID();
+  let jaProcessados = new Set<string>();
+  if (resumeRunId) {
+    const { data: done } = await supabase
+      .from("campaign_decisions")
+      .select("mlb")
+      .eq("run_id", resumeRunId);
+    jaProcessados = new Set((done ?? []).map((d) => d.mlb));
+    yield {
+      type: "log",
+      message: `Retomando rodada ${resumeRunId} — ${jaProcessados.size}/${totalMlbs} MLBs já processados.`,
+    };
+  }
+  const mlbs = [...byMlb.keys()].filter((mlb) => !jaProcessados.has(mlb));
+
+  if (!resumeRunId) {
+    yield {
+      type: "log",
+      message: `${totalMlbs} MLBs configurados (${allRows.length} linhas / variações no total). Conectando ao Mercado Livre...`,
+    };
+  }
   const client = await MercadoLivreClient.fromStore();
   const userId = await client.getUserId();
-  const runId = randomUUID();
   const ctx: RunContext = { client, userId, taxasPct, weights, runId };
 
-  let totalDecisions = 0;
-  let totalEscolhidas = 0;
+  let doneCount = jaProcessados.size;
 
   for (let i = 0; i < mlbs.length; i += CONCURRENCY) {
+    if (Date.now() - startedAt > TIME_BUDGET_MS) {
+      yield { type: "partial", runId, done: doneCount, total: totalMlbs };
+      return;
+    }
+
     const batch = mlbs.slice(i, i + CONCURRENCY);
     const results = await Promise.all(batch.map((mlb) => processMlb(mlb, byMlb.get(mlb)!, ctx)));
 
@@ -412,12 +445,21 @@ export async function* runUpdate(): AsyncGenerator<ProgressEvent> {
 
     for (const r of results) {
       for (const log of r.logs) yield { type: "log", message: log };
-      totalDecisions += r.decisionRows.length;
-      totalEscolhidas += r.escolhidas;
     }
+    doneCount += batch.length;
 
-    yield { type: "progress", done: Math.min(i + CONCURRENCY, mlbs.length), total: mlbs.length };
+    yield { type: "progress", done: doneCount, total: totalMlbs };
   }
 
-  yield { type: "done", runId, totalDecisions, totalEscolhidas };
+  const { count: totalDecisions } = await supabase
+    .from("campaign_decisions")
+    .select("*", { count: "exact", head: true })
+    .eq("run_id", runId);
+  const { count: totalEscolhidas } = await supabase
+    .from("campaign_decisions")
+    .select("*", { count: "exact", head: true })
+    .eq("run_id", runId)
+    .eq("escolhida", true);
+
+  yield { type: "done", runId, totalDecisions: totalDecisions ?? 0, totalEscolhidas: totalEscolhidas ?? 0 };
 }
