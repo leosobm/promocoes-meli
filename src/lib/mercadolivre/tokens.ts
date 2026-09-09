@@ -14,7 +14,17 @@ export async function getStoredTokens(): Promise<MLTokens | null> {
   return data as MLTokens;
 }
 
+/** "Conectado" = tem access_token salvo, mesmo sem refresh_token (o ML nem
+ * sempre devolve um — nesse caso o app usa o access_token até expirar e
+ * pede pra reconectar depois, em vez de esconder a tela inteira). */
 export async function isConnected(): Promise<boolean> {
+  const tokens = await getStoredTokens();
+  return !!tokens?.access_token;
+}
+
+/** Verdadeiro só quando dá pra renovar sozinho (tem refresh_token) — usado
+ * pra avisar na tela, sem bloquear o uso enquanto o access_token durar. */
+export async function hasAutoRefresh(): Promise<boolean> {
   const tokens = await getStoredTokens();
   return !!tokens?.refresh_token;
 }

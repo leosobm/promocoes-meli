@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { createServerSupabase } from "@/lib/supabase/server";
-import { isConnected } from "@/lib/mercadolivre/tokens";
+import { hasAutoRefresh, isConnected } from "@/lib/mercadolivre/tokens";
 import UpdateButton from "@/components/UpdateButton";
 
 export default async function DashboardPage({
@@ -10,6 +10,7 @@ export default async function DashboardPage({
 }) {
   const { ml_status, detalhe } = await searchParams;
   const connected = await isConnected();
+  const autoRefresh = connected ? await hasAutoRefresh() : true;
 
   const supabase = await createServerSupabase();
   const { count: pendentes } = await supabase
@@ -58,6 +59,18 @@ export default async function DashboardPage({
         </div>
       ) : (
         <div className="rounded-lg border border-neutral-200 bg-white p-5">
+          {!autoRefresh && (
+            <div className="mb-4 rounded-md bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              Esta conexão não tem <b>refresh_token</b> — o Mercado Livre não emitiu um (confira se
+              a opção &quot;Refresh Token&quot; está habilitada nas credenciais do seu app, no
+              painel de desenvolvedores). Sem isso, o acesso expira em algumas horas e você vai
+              precisar clicar em &quot;Conectar Mercado Livre&quot; de novo quando parar de
+              funcionar.
+              <a href="/api/mercadolivre/connect" className="ml-2 font-medium underline">
+                Reconectar agora
+              </a>
+            </div>
+          )}
           <div className="mb-4 flex items-center justify-between">
             <div>
               <p className="text-sm text-neutral-500">

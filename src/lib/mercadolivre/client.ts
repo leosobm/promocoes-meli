@@ -70,7 +70,19 @@ async function refreshTokens(refreshToken: string): Promise<string> {
 
 export class NotConnectedError extends Error {
   constructor() {
-    super("Conta do Mercado Livre não conectada. Acesse /conectar para autorizar.");
+    super("Conta do Mercado Livre não conectada.");
+  }
+}
+
+/** O Mercado Livre nem sempre devolve refresh_token na troca do code (visto
+ * na prática, causa não confirmada — ver README). Sem ele não dá pra
+ * renovar sozinho: quando o access_token expira, só reconectando de novo. */
+export class TokenExpiredError extends Error {
+  constructor() {
+    super(
+      "O access_token do Mercado Livre expirou e esta conexão não tem refresh_token para renovar " +
+        "sozinha. Clique em \"Conectar Mercado Livre\" de novo para reautorizar.",
+    );
   }
 }
 
@@ -83,13 +95,23 @@ export class MercadoLivreClient {
     this.refreshToken = refreshToken;
   }
 
-  /** Carrega os tokens salvos, renovando primeiro (garante validade pelo
-   * resto da execução, que pode envolver muitas chamadas em sequência). */
+  /** Carrega os tokens salvos. Com refresh_token, renova primeiro (garante
+   * validade pelo resto da execução, que pode envolver muitas chamadas em
+   * sequência). Sem refresh_token (o ML às vezes não devolve um — ver
+   * TokenExpiredError), usa o access_token salvo enquanto ainda for válido. */
   static async fromStore(): Promise<MercadoLivreClient> {
     const stored = await getStoredTokens();
-    if (!stored || !stored.refresh_token) throw new NotConnectedError();
-    const fresh = await refreshTokens(stored.refresh_token);
-    return new MercadoLivreClient(fresh, stored.refresh_token);
+    if (!stored || !stored.access_token) throw new NotConnectedError();
+
+    if (stored.refresh_token) {
+      const fresh = await refreshTokens(stored.refresh_token);
+      return new MercadoLivreClient(fresh, stored.refresh_token);
+    }
+
+    const expiresAtMs = stored.expires_at ? new Date(stored.expires_at).getTime() : null;
+    const aindaValido = expiresAtMs !== null && expiresAtMs - Date.now() > 60_000;
+    if (!aindaValido) throw new TokenExpiredError();
+    return new MercadoLivreClient(stored.access_token, "");
   }
 
   private async request<T = unknown>(
@@ -117,6 +139,7 @@ export class MercadoLivreClient {
         });
 
         if (resp.status === 401 && attempt === 0) {
+          if (!this.refreshToken) throw new TokenExpiredError();
           this.accessToken = await refreshTokens(this.refreshToken);
           continue;
         }
