@@ -217,6 +217,7 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
     promo: ItemPromotion;
     preco: number;
     margemPct: number; // pior margem entre as variações
+    margemAoVivoPct: number | null; // pior margem NO PREÇO VIGENTE, só quando a campanha já está ativa (pra comparar antes/depois)
     skuReferencia: string | null;
     descontoPct: number;
     mlPct: number | null;
@@ -234,6 +235,7 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
     const priceCtx = { freteMedio, taxasPct: ctx.taxasPct, comissaoPct, descontoTarifaPct: descontoTarifaPctFrac };
 
     let preco: number;
+    let margemAoVivoPct: number | null = null;
 
     if (typeCfg.priceMode === "seller_defined") {
       let maiorPreco = -Infinity;
@@ -249,7 +251,7 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
       }
       if (erroImpossivel) {
         evaluated.push({
-          promo, preco: 0, margemPct: -Infinity, skuReferencia: null, descontoPct: 0,
+          promo, preco: 0, margemPct: -Infinity, margemAoVivoPct: null, skuReferencia: null, descontoPct: 0,
           mlPct, mlFonte, score: 0, rejeitada: erroImpossivel, variacoes: null,
         });
         continue;
@@ -257,11 +259,39 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
       preco = maiorPreco;
       if (promo.min_discounted_price != null && preco < promo.min_discounted_price) preco = promo.min_discounted_price;
       if (promo.max_discounted_price != null && preco > promo.max_discounted_price) preco = promo.max_discounted_price;
+
+      // Campanha já ATIVA (status ao vivo) e tipo onde o vendedor define o
+      // preço: só recomenda MUDAR o preço vigente se (a) ele já não estiver
+      // mais seguro (margem caiu abaixo do mínimo de alguma variação) ou
+      // (b) o preço recém-calculado for MENOR (mais atrativo ao cliente) —
+      // nunca sobe o preço de volta só porque a fórmula "quer" um valor
+      // maior, se o que já está lá continua dentro dos parâmetros.
+      if (ACTIVE_STATUSES.has((promo.status ?? "").toLowerCase())) {
+        const precoAoVivo = promo.total_price_for_boosted_offer ?? promo.price ?? null;
+        if (precoAoVivo != null) {
+          let piorAoVivo = Infinity;
+          let aoVivoSeguro = true;
+          for (const row of rows) {
+            const m = calcMargemResultante({
+              preco: precoAoVivo, cmv: row.cmv, freteMedio, comissaoPct,
+              taxasPct: ctx.taxasPct, descontoTarifaValor: promo.discount_meli_boost_amount ?? 0,
+            });
+            if (m < piorAoVivo) piorAoVivo = m;
+            if (m < row.margem_minima_pct / 100) aoVivoSeguro = false;
+          }
+          margemAoVivoPct = piorAoVivo * 100;
+          if (aoVivoSeguro && precoAoVivo <= preco) {
+            preco = precoAoVivo; // mantém — já é bom e pelo menos tão atrativo quanto o calculado
+          }
+          // senão: preco continua sendo o alvo calculado (ou porque o
+          // vigente não é mais seguro, ou porque o alvo é mais atrativo)
+        }
+      }
     } else {
       preco = promo.total_price_for_boosted_offer ?? promo.price ?? 0;
       if (!preco) {
         evaluated.push({
-          promo, preco: 0, margemPct: -Infinity, skuReferencia: null, descontoPct: 0,
+          promo, preco: 0, margemPct: -Infinity, margemAoVivoPct: null, skuReferencia: null, descontoPct: 0,
           mlPct, mlFonte, score: 0,
           rejeitada: "Campanha sem preço definido pela API e sem dados suficientes para calcular (tipo sem preço por item).",
           variacoes: null,
@@ -286,7 +316,7 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
 
     if (rejeitadaPorRow) {
       evaluated.push({
-        promo, preco, margemPct: pior!.margemFrac, skuReferencia: pior!.row.sku || null,
+        promo, preco, margemPct: pior!.margemFrac, margemAoVivoPct, skuReferencia: pior!.row.sku || null,
         descontoPct: 0, mlPct, mlFonte, score: 0, rejeitada: rejeitadaPorRow, variacoes,
       });
       continue;
@@ -300,7 +330,7 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
       ctx.weights,
     );
     evaluated.push({
-      promo, preco, margemPct: pior!.margemFrac, skuReferencia: pior!.row.sku || null,
+      promo, preco, margemPct: pior!.margemFrac, margemAoVivoPct, skuReferencia: pior!.row.sku || null,
       descontoPct, mlPct, mlFonte, score, rejeitada: null, variacoes,
     });
   }
@@ -318,23 +348,49 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
 
   let recomendada = melhor;
   let trocaFlag = false;
+  let atualizaPrecoMesmaCampanha = false;
   let switchBlockedReason: string | null = null;
-  if (ativaEntry && melhor && ativaEntry.promo.promotion_id !== melhor.promo.promotion_id) {
+  if (ativaEntry && melhor) {
+    const mesmaCampanha = ativaEntry.promo.promotion_id === melhor.promo.promotion_id;
     const cfgAtiva = getCampaignTypeConfig(ativaEntry.promo.promotion_type);
-    if (cfgAtiva.canDeleteAfterActive) {
-      trocaFlag = true; // troca executável: sai da ativa, entra na nova
-    } else if (ativaEntry.rejeitada === null) {
-      // não dá pra sair da ativa (ex.: LIGHTNING/DOD) — mantém, mesmo a
-      // outra pontuando mais.
-      recomendada = ativaEntry;
-      switchBlockedReason =
-        `${melhor.promo.promotion_type} pontuaria mais (${melhor.score.toFixed(1)} x ${ativaEntry.score.toFixed(1)}), ` +
-        `mas não é possível sair de ${ativaEntry.promo.promotion_type} depois de ativa (confirmado na doc oficial) — mantendo a atual.`;
+
+    if (mesmaCampanha) {
+      // Mesma campanha — só é preciso agir se o preço calculado (`melhor.
+      // preco`) difere do preço realmente vigente na API. A comparação
+      // "manter o preço ao vivo se ele já for seguro e pelo menos tão
+      // atrativo" já aconteceu na hora de montar `evaluated` (preco só
+      // vira o alvo calculado quando o vigente não serve mais ou o alvo é
+      // menor) — então basta comparar `melhor.preco` com o preço ao vivo.
+      const precoAoVivo = ativaEntry.promo.total_price_for_boosted_offer ?? ativaEntry.promo.price ?? null;
+      const precisaAtualizar = precoAoVivo != null && Math.abs(melhor.preco - precoAoVivo) > 0.01;
+      if (precisaAtualizar) {
+        if (cfgAtiva.canDeleteAfterActive) {
+          trocaFlag = true;
+          atualizaPrecoMesmaCampanha = true; // sai e reentra na MESMA campanha, só com preço novo
+        } else {
+          switchBlockedReason =
+            `Preço ideal seria R$ ${melhor.preco.toFixed(2)} (vigente: R$ ${precoAoVivo!.toFixed(2)}), mas não é possível ` +
+            `alterar o preço de ${ativaEntry.promo.promotion_type} depois de ativa (confirmado na doc oficial) — mantendo o vigente.`;
+        }
+      }
+      // senão: preço vigente já está bom (seguro e pelo menos tão
+      // atrativo quanto o calculado) — nenhuma ação, "Mantida" de verdade.
+    } else {
+      if (cfgAtiva.canDeleteAfterActive) {
+        trocaFlag = true; // troca executável: sai da ativa, entra na nova
+      } else if (ativaEntry.rejeitada === null) {
+        // não dá pra sair da ativa (ex.: LIGHTNING/DOD) — mantém, mesmo a
+        // outra pontuando mais.
+        recomendada = ativaEntry;
+        switchBlockedReason =
+          `${melhor.promo.promotion_type} pontuaria mais (${melhor.score.toFixed(1)} x ${ativaEntry.score.toFixed(1)}), ` +
+          `mas não é possível sair de ${ativaEntry.promo.promotion_type} depois de ativa (confirmado na doc oficial) — mantendo a atual.`;
+      }
+      // se a ativa está rejeitada (margem caiu abaixo do mínimo) e não dá
+      // pra sair dela, `recomendada` continua sendo `melhor` (só
+      // informativo — nenhuma gravação possível) e um aviso é anexado na
+      // própria linha da ativa mais abaixo.
     }
-    // se a ativa está rejeitada (margem caiu abaixo do mínimo) e não dá
-    // pra sair dela, `recomendada` continua sendo `melhor` (só
-    // informativo — nenhuma gravação possível) e um aviso é anexado na
-    // própria linha da ativa mais abaixo.
   }
 
   let escolhidas = 0;
@@ -342,7 +398,8 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
     const typeCfg = getCampaignTypeConfig(e.promo.promotion_type);
     const isEscolhida = recomendada !== null && e.promo.promotion_id === recomendada.promo.promotion_id;
     const isAtivaAtual = ativaEntry !== null && e.promo.promotion_id === ativaEntry.promo.promotion_id;
-    const ehTroca = isEscolhida && trocaFlag && isEscolhida && !isAtivaAtual;
+    const ehTroca = isEscolhida && trocaFlag;
+    const ehAtualizacaoDePreco = ehTroca && isAtivaAtual && atualizaPrecoMesmaCampanha;
     const refTxt = e.skuReferencia ? ` (referência: SKU ${e.skuReferencia}, a de menor margem entre ${rows.length} variação(ões))` : "";
 
     let motivo: string;
@@ -351,11 +408,20 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
       if (isAtivaAtual && ativaEntry && !getCampaignTypeConfig(ativaEntry.promo.promotion_type).canDeleteAfterActive) {
         motivo += ` ATENÇÃO: esta campanha está ATIVA e não pode ser removida automaticamente (tipo não permite sair depois de ativa) — revise manualmente no painel do Mercado Livre.`;
       }
+    } else if (ehAtualizacaoDePreco) {
+      const precoAoVivo = ativaEntry!.promo.total_price_for_boosted_offer ?? ativaEntry!.promo.price ?? null;
+      const margemAntes = ativaEntry!.margemAoVivoPct ?? ativaEntry!.margemPct * 100;
+      const direcao = precoAoVivo != null && e.preco < precoAoVivo ? "mais atrativo ao cliente" : "necessário pra manter a margem mínima";
+      motivo =
+        `Atualização de preço recomendada: campanha ${e.promo.promotion_type} já ativa com preço vigente ` +
+        `R$ ${precoAoVivo?.toFixed(2) ?? "?"} (margem ${margemAntes.toFixed(1)}%) — novo preço R$ ${e.preco.toFixed(2)} ` +
+        `(margem ${(e.margemPct * 100).toFixed(1)}%) é ${direcao}.${refTxt}`;
     } else if (ehTroca) {
-      const deltaMargem = (e.margemPct - ativaEntry!.margemPct) * 100;
+      const margemAntesTroca = ativaEntry!.margemAoVivoPct ?? ativaEntry!.margemPct * 100;
+      const deltaMargem = e.margemPct * 100 - margemAntesTroca;
       const deltaDesconto = (e.descontoPct - ativaEntry!.descontoPct) * 100;
       motivo =
-        `Troca recomendada: sair de ${ativaEntry!.promo.promotion_type} (margem ${(ativaEntry!.margemPct * 100).toFixed(1)}%, ` +
+        `Troca recomendada: sair de ${ativaEntry!.promo.promotion_type} (margem ${margemAntesTroca.toFixed(1)}%, ` +
         `desconto ${(ativaEntry!.descontoPct * 100).toFixed(1)}%, score ${ativaEntry!.score.toFixed(1)}) e entrar em ${e.promo.promotion_type} ` +
         `(margem ${(e.margemPct * 100).toFixed(1)}%, desconto ${(e.descontoPct * 100).toFixed(1)}%, score ${e.score.toFixed(1)}) — ` +
         `margem ${deltaMargem >= 0 ? "+" : ""}${deltaMargem.toFixed(1)}pp, desconto ${deltaDesconto >= 0 ? "+" : ""}${deltaDesconto.toFixed(1)}pp.${refTxt}`;
@@ -393,13 +459,13 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
       campanha_anterior_id: ehTroca ? ativaEntry!.promo.promotion_id : null,
       campanha_anterior_tipo: ehTroca ? ativaEntry!.promo.promotion_type : null,
       campanha_anterior_offer_id: ehTroca ? ativaEntry!.promo.offer_id ?? null : null,
-      campanha_anterior_margem_pct: ehTroca ? ativaEntry!.margemPct * 100 : null,
-      campanha_anterior_score: ehTroca ? ativaEntry!.score : null,
+      campanha_anterior_margem_pct: ehTroca ? ativaEntry!.margemAoVivoPct ?? ativaEntry!.margemPct * 100 : null,
+      campanha_anterior_score: ehTroca && !ehAtualizacaoDePreco ? ativaEntry!.score : null,
       sku_referencia: e.skuReferencia,
       variacoes: e.variacoes,
       score: e.score,
       escolhida: isEscolhida,
-      gravavel: isEscolhida && !isAtivaAtual && typeCfg.writeSupported,
+      gravavel: typeCfg.writeSupported && (ehTroca || (isEscolhida && !isAtivaAtual)),
       motivo,
       status: e.rejeitada ? "rejeitada" : "pendente",
     });
