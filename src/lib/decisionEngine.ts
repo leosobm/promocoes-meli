@@ -36,6 +36,7 @@ interface AppSettings {
   peso_desconto_pct: number;
   peso_ml_pct: number;
   peso_margem_pct: number;
+  margem_tolerancia_pct: number;
 }
 
 export interface ItemConfigRow {
@@ -77,6 +78,8 @@ interface DecisionInsertRow {
   score?: number | null;
   escolhida?: boolean;
   gravavel?: boolean;
+  dentro_tolerancia?: boolean;
+  recomendacao?: string | null;
   motivo: string;
   status: string;
   run_id: string;
@@ -93,6 +96,7 @@ export interface RunContext {
   client: MercadoLivreClient;
   userId: number;
   taxasPct: number;
+  toleranciaFrac: number; // 0.10 = 10% de tolerância sobre o piso de cada item
   weights: ScoreWeights;
   runId: string;
 }
@@ -155,7 +159,10 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
   // erro) — um .insert() em lote com objetos de chaves diferentes manda
   // NULL explícito pra coluna ausente numas linhas em vez de aplicar o
   // DEFAULT do banco, o que viola a constraint NOT NULL dessas colunas.
-  const base = { run_id: ctx.runId, escolhida: false, gravavel: false, reducao_tarifa: false, troca: false };
+  const base = {
+    run_id: ctx.runId, escolhida: false, gravavel: false, reducao_tarifa: false, troca: false,
+    dentro_tolerancia: false, recomendacao: "sem_dados",
+  };
 
   const detail = await ctx.client.getItemDetail(mlb);
   if (!detail) {
@@ -314,14 +321,9 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
       }
     }
 
-    if (rejeitadaPorRow) {
-      evaluated.push({
-        promo, preco, margemPct: pior!.margemFrac, margemAoVivoPct, skuReferencia: pior!.row.sku || null,
-        descontoPct: 0, mlPct, mlFonte, score: 0, rejeitada: rejeitadaPorRow, variacoes,
-      });
-      continue;
-    }
-
+    // Desconto/score calculados sempre (mesmo quando rejeitada) — usado
+    // pra ranquear candidatos de tolerância quando não há nenhuma opção
+    // dentro do piso estrito (ver bloco de tolerância mais abaixo).
     const { price: precoAtualPior } = resolveCurrentPrice(detail, pior!.row.sku);
     const precoOriginal = promo.original_price ?? precoAtualPior ?? detail.price ?? preco;
     const descontoPct = calcDescontoConsumidorPct(precoOriginal, preco);
@@ -329,6 +331,15 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
       { descontoConsumidorPct: descontoPct, mlParticipacaoPct: mlPct, margemPct: pior!.margemFrac },
       ctx.weights,
     );
+
+    if (rejeitadaPorRow) {
+      evaluated.push({
+        promo, preco, margemPct: pior!.margemFrac, margemAoVivoPct, skuReferencia: pior!.row.sku || null,
+        descontoPct, mlPct, mlFonte, score, rejeitada: rejeitadaPorRow, variacoes,
+      });
+      continue;
+    }
+
     evaluated.push({
       promo, preco, margemPct: pior!.margemFrac, margemAoVivoPct, skuReferencia: pior!.row.sku || null,
       descontoPct, mlPct, mlFonte, score, rejeitada: null, variacoes,
@@ -339,6 +350,28 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
   const melhor = viaveis.length > 0
     ? viaveis.reduce((best, cur) => (cur.score > best.score ? cur : best))
     : null;
+
+  // Sem NENHUMA campanha dentro do piso estrito: procura a melhor opção
+  // que caia dentro da TOLERÂNCIA configurada (todas as variações do item
+  // acima do piso*[1-tolerância], não só a estrita) — vira uma
+  // "oportunidade abaixo do piso" pra opt-in manual, nunca escolhida
+  // automaticamente. Ignora candidatas com erro de cálculo (sem variacoes).
+  let melhorTolerancia: (typeof evaluated)[number] | null = null;
+  if (melhor === null && ctx.toleranciaFrac > 0) {
+    const candidatosTolerancia = evaluated.filter((e) => {
+      if (e.rejeitada === null || !e.variacoes) return false;
+      if (ACTIVE_STATUSES.has((e.promo.status ?? "").toLowerCase())) return false; // já ativa — nada pra "opt-in"
+      return rows.every((row) => {
+        const v = e.variacoes!.find((vv) => vv.sku === (row.sku || null));
+        if (!v || v.margem_calculada_pct == null) return false;
+        const pisoTolerado = row.margem_minima_pct * (1 - ctx.toleranciaFrac);
+        return v.margem_calculada_pct >= pisoTolerado;
+      });
+    });
+    melhorTolerancia = candidatosTolerancia.length > 0
+      ? candidatosTolerancia.reduce((best, cur) => (cur.score > best.score ? cur : best))
+      : null;
+  }
 
   // A campanha em que o item JÁ está participando, lida ao vivo da API
   // (status "started"/"active"/etc.) — pode ou não ser a mesma que a
@@ -400,10 +433,15 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
     const isAtivaAtual = ativaEntry !== null && e.promo.promotion_id === ativaEntry.promo.promotion_id;
     const ehTroca = isEscolhida && trocaFlag;
     const ehAtualizacaoDePreco = ehTroca && isAtivaAtual && atualizaPrecoMesmaCampanha;
+    const ehTolerancia = melhorTolerancia !== null && e.promo.promotion_id === melhorTolerancia.promo.promotion_id;
     const refTxt = e.skuReferencia ? ` (referência: SKU ${e.skuReferencia}, a de menor margem entre ${rows.length} variação(ões))` : "";
 
     let motivo: string;
-    if (e.rejeitada) {
+    if (ehTolerancia) {
+      motivo =
+        `Abaixo do piso de margem, mas DENTRO DA TOLERÂNCIA configurada (${(ctx.toleranciaFrac * 100).toFixed(0)}%): ` +
+        `margem resultante ${(e.margemPct * 100).toFixed(1)}%${refTxt}. Não foi escolhida automaticamente — requer sua aprovação manual explícita.`;
+    } else if (e.rejeitada) {
       motivo = `Rejeitada: ${e.rejeitada}`;
       if (isAtivaAtual && ativaEntry && !getCampaignTypeConfig(ativaEntry.promo.promotion_type).canDeleteAfterActive) {
         motivo += ` ATENÇÃO: esta campanha está ATIVA e não pode ser removida automaticamente (tipo não permite sair depois de ativa) — revise manualmente no painel do Mercado Livre.`;
@@ -437,13 +475,26 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
       motivo = `Válida (margem ${(e.margemPct * 100).toFixed(1)}%${refTxt}) mas superada por outra campanha com pontuação maior (${recomendada?.score.toFixed(1)}).`;
     }
 
+    let recomendacao: string;
+    if (ehTolerancia) recomendacao = "tolerancia";
+    else if (e.rejeitada) recomendacao = "rejeitada";
+    else if (ehAtualizacaoDePreco) {
+      const precoAoVivo = ativaEntry!.promo.total_price_for_boosted_offer ?? ativaEntry!.promo.price ?? null;
+      recomendacao = precoAoVivo != null && e.preco < precoAoVivo ? "diminuir_preco" : "aumentar_preco";
+    } else if (ehTroca) recomendacao = "troca_campanha";
+    else if (isEscolhida && isAtivaAtual) recomendacao = "mantida";
+    else if (isEscolhida) recomendacao = "nova_adesao";
+    else recomendacao = "superada";
+
+    const statusFinal = ehTolerancia ? "tolerancia" : e.rejeitada ? "rejeitada" : "pendente";
+
     decisionRows.push({
       ...base,
       mlb,
       promotion_id: e.promo.promotion_id,
       promotion_type: e.promo.promotion_type,
       offer_id: e.promo.offer_id ?? null,
-      preco_proposto: e.rejeitada ? null : e.preco,
+      preco_proposto: e.rejeitada && !ehTolerancia ? null : e.preco,
       preco_original: e.promo.original_price ?? null,
       margem_calculada_pct: e.margemPct === -Infinity ? null : e.margemPct * 100,
       desconto_consumidor_pct: e.descontoPct * 100,
@@ -465,9 +516,11 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
       variacoes: e.variacoes,
       score: e.score,
       escolhida: isEscolhida,
-      gravavel: typeCfg.writeSupported && (ehTroca || (isEscolhida && !isAtivaAtual)),
+      gravavel: ehTolerancia ? typeCfg.writeSupported : typeCfg.writeSupported && (ehTroca || (isEscolhida && !isAtivaAtual)),
+      dentro_tolerancia: ehTolerancia,
+      recomendacao,
       motivo,
-      status: e.rejeitada ? "rejeitada" : "pendente",
+      status: statusFinal,
     });
     if (isEscolhida) escolhidas++;
   }
@@ -492,7 +545,7 @@ export async function* runUpdate(resumeRunId?: string): AsyncGenerator<ProgressE
 
   const { data: settingsRow } = await supabase
     .from("app_settings")
-    .select("taxas_pct, peso_desconto_pct, peso_ml_pct, peso_margem_pct")
+    .select("taxas_pct, peso_desconto_pct, peso_ml_pct, peso_margem_pct, margem_tolerancia_pct")
     .eq("id", 1)
     .single();
   const settings = settingsRow as AppSettings;
@@ -502,6 +555,7 @@ export async function* runUpdate(resumeRunId?: string): AsyncGenerator<ProgressE
     pesoMargem: settings.peso_margem_pct / 100,
   };
   const taxasPct = settings.taxas_pct / 100;
+  const toleranciaFrac = settings.margem_tolerancia_pct / 100;
 
   // O Supabase/PostgREST limita cada resposta a 1000 linhas por padrão —
   // sem paginação explícita, um catálogo grande (visto na prática: 2891
@@ -569,7 +623,7 @@ export async function* runUpdate(resumeRunId?: string): AsyncGenerator<ProgressE
   }
   const client = await MercadoLivreClient.fromStore();
   const userId = await client.getUserId();
-  const ctx: RunContext = { client, userId, taxasPct, weights, runId };
+  const ctx: RunContext = { client, userId, taxasPct, toleranciaFrac, weights, runId };
 
   let doneCount = jaProcessados.size;
 

@@ -8,6 +8,7 @@ interface Settings {
   peso_desconto_pct: number;
   peso_ml_pct: number;
   peso_margem_pct: number;
+  margem_tolerancia_pct: number;
 }
 
 export default function ConfigForm({ initial }: { initial: Settings }) {
@@ -85,6 +86,27 @@ export default function ConfigForm({ initial }: { initial: Settings }) {
             ser diretamente comparáveis a um percentual).
           </p>
         )}
+      </div>
+
+      <div className="space-y-1">
+        <label className="block text-sm font-medium text-neutral-700">
+          Tolerância abaixo do piso de margem (%)
+        </label>
+        <input
+          type="number"
+          step="0.1"
+          min="0"
+          max="100"
+          value={values.margem_tolerancia_pct}
+          onChange={(e) => setField("margem_tolerancia_pct", e.target.value)}
+          className="w-40 rounded-md border border-neutral-300 px-3 py-2 text-sm"
+        />
+        <p className="text-xs text-neutral-500">
+          Ex.: piso de 12% + tolerância de 10% = itens com margem a partir de 10,8% aparecem como
+          &quot;oportunidade abaixo do piso&quot; no painel, pra você aprovar manualmente — nunca
+          são escolhidos nem aplicados automaticamente. 0 = desliga a tolerância (comportamento
+          estrito de sempre).
+        </p>
       </div>
 
       <div className="flex items-center gap-3">

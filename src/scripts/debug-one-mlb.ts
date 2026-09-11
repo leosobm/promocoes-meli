@@ -21,7 +21,7 @@ async function main() {
 
   const { data: settingsRowRaw } = await supabase
     .from("app_settings")
-    .select("taxas_pct, peso_desconto_pct, peso_ml_pct, peso_margem_pct")
+    .select("taxas_pct, peso_desconto_pct, peso_ml_pct, peso_margem_pct, margem_tolerancia_pct")
     .eq("id", 1)
     .single();
   if (!settingsRowRaw) {
@@ -49,6 +49,7 @@ async function main() {
     client,
     userId,
     taxasPct: settingsRow.taxas_pct / 100,
+    toleranciaFrac: settingsRow.margem_tolerancia_pct / 100,
     weights: {
       pesoDesconto: settingsRow.peso_desconto_pct / 100,
       pesoMl: settingsRow.peso_ml_pct / 100,
@@ -69,7 +70,7 @@ async function main() {
 
   const { data: back } = await supabase
     .from("campaign_decisions")
-    .select("id, mlb, promotion_type, escolhida, gravavel, status, margem_calculada_pct, score, troca, campanha_anterior_tipo, motivo")
+    .select("id, mlb, promotion_type, escolhida, gravavel, status, margem_calculada_pct, score, troca, dentro_tolerancia, recomendacao, campanha_anterior_tipo, motivo")
     .eq("run_id", ctx.runId);
   console.log(">> Lido de volta do banco:", JSON.stringify(back, null, 2));
 

@@ -11,7 +11,7 @@ export default async function ConfigPage() {
   const supabase = await createServerSupabase();
   const { data: settings } = await supabase
     .from("app_settings")
-    .select("taxas_pct, peso_desconto_pct, peso_ml_pct, peso_margem_pct")
+    .select("taxas_pct, peso_desconto_pct, peso_ml_pct, peso_margem_pct, margem_tolerancia_pct")
     .eq("id", 1)
     .single();
   const { data: users } = await supabase
@@ -28,7 +28,13 @@ export default async function ConfigPage() {
             Valores globais usados no cálculo de margem e na pontuação de &quot;melhor campanha&quot;.
           </p>
         </div>
-        <ConfigForm initial={settings ?? { taxas_pct: 0, peso_desconto_pct: 40, peso_ml_pct: 35, peso_margem_pct: 25 }} />
+        <ConfigForm
+          initial={
+            settings ?? {
+              taxas_pct: 0, peso_desconto_pct: 40, peso_ml_pct: 35, peso_margem_pct: 25, margem_tolerancia_pct: 0,
+            }
+          }
+        />
       </div>
 
       <div className="space-y-4">

@@ -39,7 +39,11 @@ export async function POST(request: NextRequest) {
   const results: { id: string; mlb: string; ok: boolean; detalhe: string }[] = [];
 
   for (const d of decisions ?? []) {
-    if (!d.gravavel || d.status !== "pendente") {
+    // "tolerancia" = oportunidade abaixo do piso, dentro da tolerância
+    // configurada — nunca escolhida/aplicada automaticamente, mas pode ser
+    // aplicada aqui quando o usuário optar manualmente (mesmo fluxo de
+    // confirmação de todas as outras aplicações).
+    if (!d.gravavel || (d.status !== "pendente" && d.status !== "tolerancia")) {
       results.push({
         id: d.id,
         mlb: d.mlb,
