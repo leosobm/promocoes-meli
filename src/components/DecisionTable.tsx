@@ -99,6 +99,7 @@ export default function DecisionTable({
   const [confirmText, setConfirmText] = useState("");
   const [confirmCount, setConfirmCount] = useState("");
   const [applying, setApplying] = useState(false);
+  const [applyProgress, setApplyProgress] = useState<{ done: number; total: number } | null>(null);
   const [result, setResult] = useState<string | null>(null);
 
   const recomendacoesDisponiveis = useMemo(
@@ -206,25 +207,40 @@ export default function DecisionTable({
   async function handleApply() {
     setApplying(true);
     setResult(null);
+    const total = selectedRows.length;
+    let remaining = [...selected];
+    let okCount = 0;
+    let failCount = 0;
+    setApplyProgress({ done: 0, total });
     try {
-      const resp = await fetch("/api/aplicar", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ decisionIds: [...selected], confirmacao: confirmText }),
-      });
-      const data = await resp.json();
-      if (!resp.ok) {
-        setResult(`Erro: ${data.error}`);
-      } else {
-        const ok = data.results.filter((r: { ok: boolean }) => r.ok).length;
-        const fail = data.results.length - ok;
-        setResult(`Aplicado: ${ok} com sucesso, ${fail} com erro/pulado. Veja o Histórico para detalhes.`);
-        setSelected(new Set());
+      for (let hop = 0; hop < 200 && remaining.length > 0; hop++) {
+        const resp = await fetch("/api/aplicar", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ decisionIds: remaining, confirmacao: confirmText }),
+        });
+        const data = await resp.json();
+        if (!resp.ok) {
+          setResult(`Erro: ${data.error} (${okCount} aplicados com sucesso antes do erro)`);
+          break;
+        }
+        for (const r of data.results as { ok: boolean }[]) {
+          if (r.ok) okCount++;
+          else failCount++;
+        }
+        remaining = data.remainingIds ?? [];
+        setApplyProgress({ done: total - remaining.length, total });
+        if (data.done) {
+          setResult(`Aplicado: ${okCount} com sucesso, ${failCount} com erro/pulado. Veja o Histórico para detalhes.`);
+          setSelected(new Set());
+          break;
+        }
       }
     } catch (e) {
-      setResult(`Erro: ${e instanceof Error ? e.message : String(e)}`);
+      setResult(`Erro: ${e instanceof Error ? e.message : String(e)} (${okCount} aplicados com sucesso antes do erro)`);
     } finally {
       setApplying(false);
+      setApplyProgress(null);
       setConfirming(false);
       setConfirmText("");
       setConfirmCount("");
@@ -459,10 +475,25 @@ export default function DecisionTable({
                 />
               </div>
             )}
+            {applying && applyProgress && (
+              <div className="space-y-1">
+                <div className="h-2 w-full overflow-hidden rounded-full bg-neutral-200">
+                  <div
+                    className="h-full bg-red-500 transition-all"
+                    style={{ width: `${(applyProgress.done / Math.max(applyProgress.total, 1)) * 100}%` }}
+                  />
+                </div>
+                <p className="text-xs text-neutral-500">
+                  {applyProgress.done} de {applyProgress.total} — lotes grandes podem levar alguns
+                  minutos, não feche esta aba.
+                </p>
+              </div>
+            )}
             <div className="flex justify-end gap-2">
               <button
                 onClick={() => { setConfirming(false); setConfirmText(""); setConfirmCount(""); }}
-                className="rounded-md px-3 py-2 text-sm text-neutral-600 hover:bg-neutral-100"
+                disabled={applying}
+                className="rounded-md px-3 py-2 text-sm text-neutral-600 hover:bg-neutral-100 disabled:opacity-40"
               >
                 Cancelar
               </button>
