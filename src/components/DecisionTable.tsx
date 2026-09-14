@@ -102,6 +102,8 @@ export default function DecisionTable({
   const [applying, setApplying] = useState(false);
   const [applyProgress, setApplyProgress] = useState<{ done: number; total: number } | null>(null);
   const [result, setResult] = useState<string | null>(null);
+  const [failures, setFailures] = useState<{ mlb: string; title: string | null; promotion_type: string; detalhe: string }[]>([]);
+  const [showFailures, setShowFailures] = useState(false);
 
   const recomendacoesDisponiveis = useMemo(
     () => [...new Set(rows.map((r) => r.recomendacao).filter((r): r is string => !!r))],
@@ -208,10 +210,14 @@ export default function DecisionTable({
   async function handleApply() {
     setApplying(true);
     setResult(null);
+    setFailures([]);
+    setShowFailures(false);
     const total = selectedRows.length;
+    const rowById = new Map(rows.map((r) => [r.id, r]));
     let remaining = [...selected];
     let okCount = 0;
     let failCount = 0;
+    const allFailures: { mlb: string; title: string | null; promotion_type: string; detalhe: string }[] = [];
     setApplyProgress({ done: 0, total });
     try {
       for (let hop = 0; hop < 200 && remaining.length > 0; hop++) {
@@ -225,14 +231,27 @@ export default function DecisionTable({
           setResult(`Erro: ${data.error} (${okCount} aplicados com sucesso antes do erro)`);
           break;
         }
-        for (const r of data.results as { ok: boolean }[]) {
+        for (const r of data.results as { id: string; mlb: string; ok: boolean; detalhe: string }[]) {
           if (r.ok) okCount++;
-          else failCount++;
+          else {
+            failCount++;
+            allFailures.push({
+              mlb: r.mlb,
+              title: rowById.get(r.id)?.title ?? null,
+              promotion_type: rowById.get(r.id)?.promotion_type ?? "-",
+              detalhe: r.detalhe,
+            });
+          }
         }
+        setFailures([...allFailures]);
         remaining = data.remainingIds ?? [];
         setApplyProgress({ done: total - remaining.length, total });
         if (data.done) {
-          setResult(`Aplicado: ${okCount} com sucesso, ${failCount} com erro/pulado. Veja o Histórico para detalhes.`);
+          setResult(
+            failCount > 0
+              ? `Aplicado: ${okCount} com sucesso, ${failCount} com erro/pulado — detalhes abaixo.`
+              : `Aplicado: ${okCount} com sucesso.`,
+          );
           setSelected(new Set());
           break;
         }
@@ -451,7 +470,47 @@ export default function DecisionTable({
           >
             Aplicar selecionados ({selected.size})
           </button>
-          {result && <span className="ml-3 text-sm text-neutral-600">{result}</span>}
+        </div>
+      )}
+
+      {result && (
+        <div className="space-y-2 rounded-lg border border-neutral-200 bg-white p-4">
+          <p className="text-sm text-neutral-700">{result}</p>
+          {failures.length > 0 && (
+            <div>
+              <button
+                onClick={() => setShowFailures((v) => !v)}
+                className="text-xs font-medium text-neutral-500 hover:underline"
+              >
+                {showFailures ? "Ocultar detalhes dos erros" : `Ver detalhes dos erros (${failures.length})`}
+              </button>
+              {showFailures && (
+                <div className="mt-2 max-h-80 overflow-auto rounded-md border border-neutral-200">
+                  <table className="w-full text-xs">
+                    <thead className="sticky top-0 bg-neutral-50 text-left uppercase text-neutral-500">
+                      <tr>
+                        <th className="p-2">MLB</th>
+                        <th className="p-2">Campanha</th>
+                        <th className="p-2">Detalhe do erro</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {failures.map((f, i) => (
+                        <tr key={`${f.mlb}-${i}`} className="border-t border-neutral-100 align-top">
+                          <td className="p-2 font-medium text-neutral-900">
+                            {f.mlb}
+                            {f.title && <div className="font-normal text-neutral-400">{f.title}</div>}
+                          </td>
+                          <td className="p-2">{f.promotion_type}</td>
+                          <td className="max-w-md p-2 text-neutral-600">{f.detalhe}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
