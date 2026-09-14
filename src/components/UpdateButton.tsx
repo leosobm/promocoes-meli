@@ -25,12 +25,13 @@ export default function UpdateButton() {
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [summary, setSummary] = useState<string | null>(null);
   const [showLogs, setShowLogs] = useState(false);
+  const [apenasAtivos, setApenasAtivos] = useState(false);
 
   async function runOnce(runId?: string): Promise<StreamOutcome> {
     const resp = await fetch("/api/atualizar", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(runId ? { runId } : {}),
+      body: JSON.stringify({ ...(runId ? { runId } : {}), apenasAtivos }),
     });
     if (!resp.body) throw new Error("Resposta sem corpo (stream).");
     const reader = resp.body.getReader();
@@ -114,6 +115,28 @@ export default function UpdateButton() {
 
   return (
     <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-4 text-sm text-neutral-600">
+        <label className="flex items-center gap-1.5">
+          <input
+            type="radio"
+            name="escopo-atualizacao"
+            checked={!apenasAtivos}
+            disabled={status === "rodando"}
+            onChange={() => setApenasAtivos(false)}
+          />
+          Todos os itens
+        </label>
+        <label className="flex items-center gap-1.5">
+          <input
+            type="radio"
+            name="escopo-atualizacao"
+            checked={apenasAtivos}
+            disabled={status === "rodando"}
+            onChange={() => setApenasAtivos(true)}
+          />
+          Só anúncios ativos
+        </label>
+      </div>
       <div className="flex flex-wrap items-center gap-3">
         <button
           onClick={handleClick}

@@ -15,9 +15,11 @@ export const maxDuration = 60;
  * tempo estourado) em vez de recomeçar do zero. */
 export async function POST(request: NextRequest) {
   let resumeRunId: string | undefined;
+  let apenasAtivos = false;
   try {
     const body = await request.json();
     resumeRunId = body?.runId || undefined;
+    apenasAtivos = !!body?.apenasAtivos;
   } catch {
     // corpo vazio = primeira chamada de uma rodada nova, sem runId ainda
   }
@@ -27,7 +29,7 @@ export async function POST(request: NextRequest) {
     async start(controller) {
       const send = (obj: unknown) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
       try {
-        for await (const event of runUpdate(resumeRunId)) {
+        for await (const event of runUpdate(resumeRunId, apenasAtivos)) {
           send(event);
         }
       } catch (e) {

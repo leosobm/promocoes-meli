@@ -36,6 +36,7 @@ export interface DecisionReportRow {
   campanha_anterior_tipo: string | null;
   campanha_anterior_margem_pct: number | null;
   campanha_anterior_score: number | null;
+  recomendacao: string | null;
   score: number | null;
   motivo: string;
   status: string;
@@ -89,7 +90,7 @@ export async function getLatestRunReport(
     supabase
       .from("campaign_decisions")
       .select(
-        "id, mlb, promotion_id, promotion_type, preco_proposto, preco_original, margem_calculada_pct, desconto_consumidor_pct, reducao_tarifa, reducao_tarifa_pct, reducao_tarifa_valor, reducao_tarifa_fonte, troca, campanha_anterior_tipo, campanha_anterior_margem_pct, campanha_anterior_score, score, motivo, status, escolhida, created_at, applied_at",
+        "id, mlb, promotion_id, promotion_type, preco_proposto, preco_original, margem_calculada_pct, desconto_consumidor_pct, reducao_tarifa, reducao_tarifa_pct, reducao_tarifa_valor, reducao_tarifa_fonte, troca, campanha_anterior_tipo, campanha_anterior_margem_pct, campanha_anterior_score, recomendacao, score, motivo, status, escolhida, created_at, applied_at",
       )
       .eq("run_id", runId)
       .order("created_at", { ascending: false })
@@ -128,8 +129,13 @@ export async function getLatestRunReport(
     const withTitle: DecisionReportRow = { ...representative, title: titleByMlb.get(mlb) ?? null };
 
     if (representative.status === "aplicada") aderido.push(withTitle);
-    else if (representative.status === "pendente" && representative.escolhida) paraRevisao.push(withTitle);
-    else naoAderido.push(withTitle); // rejeitada, erro, ou pendente-sem-escolhida (sem campanha viável)
+    // "mantida" = já é a melhor campanha, nenhuma mudança sugerida — não há
+    // nada pra revisar, então cai em não aderido junto com os sem campanha
+    // viável (só "para revisão" quando existe de fato uma ação sugerida:
+    // nova adesão, troca, ou atualização de preço).
+    else if (representative.status === "pendente" && representative.escolhida && representative.recomendacao !== "mantida") {
+      paraRevisao.push(withTitle);
+    } else naoAderido.push(withTitle); // rejeitada, erro, mantida, ou pendente-sem-escolhida (sem campanha viável)
   }
 
   return {

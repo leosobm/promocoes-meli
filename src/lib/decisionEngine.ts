@@ -391,9 +391,40 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
   }
 
   const viaveis = evaluated.filter((e) => e.rejeitada === null);
-  const melhor = viaveis.length > 0
-    ? viaveis.reduce((best, cur) => (cur.score > best.score ? cur : best))
-    : null;
+
+  // A campanha em que o item JÁ está participando, lida ao vivo da API
+  // (status "started"/"active"/etc.) — pode ou não ser a mesma que a
+  // melhor pontuação atual. Precisa vir ANTES de `melhor` porque as duas
+  // regras de negócio abaixo (bloqueio de troca pra SELLER_CAMPAIGN e
+  // priorização de PRE_NEGOTIATED) dependem de saber qual campanha já
+  // está ativa.
+  const ativaEntry = evaluated.find((e) => ACTIVE_STATUSES.has((e.promo.status ?? "").toLowerCase())) ?? null;
+
+  // Regra de negócio: só recomenda TROCAR de campanha pra SELLER_CAMPAIGN
+  // quando a margem da campanha ativa já caiu abaixo do tolerável (nem a
+  // tolerância configurada segura mais) — SELLER_CAMPAIGN não deve "roubar"
+  // uma troca só por pontuar mais enquanto a ativa ainda está numa margem
+  // aceitável. Não afeta nova adesão (sem campanha ativa) nem quando a
+  // própria ativa já é SELLER_CAMPAIGN.
+  const margemAtivaAoVivo = ativaEntry ? ativaEntry.margemAoVivoPct ?? ativaEntry.margemPct * 100 : null;
+  const pisoToleradoMaisExigente = Math.max(...rows.map((row) => row.margem_minima_pct * (1 - ctx.toleranciaFrac)));
+  const ativaAbaixoDoTolerable = margemAtivaAoVivo != null && margemAtivaAoVivo < pisoToleradoMaisExigente;
+  const bloquearSellerCampaignComoTroca =
+    ativaEntry !== null && ativaEntry.promo.promotion_type !== "SELLER_CAMPAIGN" && !ativaAbaixoDoTolerable;
+  const poolMelhor = bloquearSellerCampaignComoTroca
+    ? viaveis.filter((e) => e.promo.promotion_type !== "SELLER_CAMPAIGN")
+    : viaveis;
+
+  // Regra de negócio: PRE_NEGOTIATED é um desconto pré-acordado direto com
+  // o Mercado Livre — sempre que houver uma oferta viável desse tipo, ela
+  // deve ser a sugestão de adesão, independente de pontuar menos que outra
+  // campanha.
+  const preNegociadasViaveis = poolMelhor.filter((e) => e.promo.promotion_type === "PRE_NEGOTIATED");
+  const melhor = preNegociadasViaveis.length > 0
+    ? preNegociadasViaveis.reduce((best, cur) => (cur.score > best.score ? cur : best))
+    : poolMelhor.length > 0
+      ? poolMelhor.reduce((best, cur) => (cur.score > best.score ? cur : best))
+      : null;
 
   // Sem NENHUMA campanha dentro do piso estrito: procura a melhor opção
   // que caia dentro da TOLERÂNCIA configurada (todas as variações do item
@@ -416,12 +447,6 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
       ? candidatosTolerancia.reduce((best, cur) => (cur.score > best.score ? cur : best))
       : null;
   }
-
-  // A campanha em que o item JÁ está participando, lida ao vivo da API
-  // (status "started"/"active"/etc.) — pode ou não ser a mesma que a
-  // melhor pontuação atual. Comparar as duas é o que decide "trocar" ou
-  // "manter".
-  const ativaEntry = evaluated.find((e) => ACTIVE_STATUSES.has((e.promo.status ?? "").toLowerCase())) ?? null;
 
   let recomendada = melhor;
   let trocaFlag = false;
@@ -582,7 +607,10 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
 // nenhum aviso).
 const TIME_BUDGET_MS = 45_000;
 
-export async function* runUpdate(resumeRunId?: string): AsyncGenerator<ProgressEvent> {
+export async function* runUpdate(
+  resumeRunId?: string,
+  apenasAtivos?: boolean,
+): AsyncGenerator<ProgressEvent> {
   const startedAt = Date.now();
   const supabase = createServiceSupabase();
 
@@ -631,7 +659,36 @@ export async function* runUpdate(resumeRunId?: string): AsyncGenerator<ProgressE
     if (!byMlb.has(row.mlb)) byMlb.set(row.mlb, []);
     byMlb.get(row.mlb)!.push(row);
   }
+
+  // "Apenas itens ativos" = anúncio com status "active" no Mercado Livre
+  // (não pausado/fechado) — usa o cache de rodadas anteriores
+  // (items_cache.status) em vez de consultar a API antes de decidir o que
+  // processar. Itens nunca sincronizados (sem linha em items_cache) ficam
+  // de fora desse filtro — rode "todos" pelo menos uma vez pra populá-los.
+  if (apenasAtivos) {
+    const todosMlbs = [...byMlb.keys()];
+    const ativos = new Set<string>();
+    for (let i = 0; i < todosMlbs.length; i += 1000) {
+      const bloco = todosMlbs.slice(i, i + 1000);
+      const { data: page } = await supabase
+        .from("items_cache")
+        .select("mlb, status")
+        .in("mlb", bloco)
+        .eq("status", "active");
+      for (const it of page ?? []) ativos.add(it.mlb);
+    }
+    for (const mlb of todosMlbs) {
+      if (!ativos.has(mlb)) byMlb.delete(mlb);
+    }
+  }
   const totalMlbs = byMlb.size;
+  if (apenasAtivos && totalMlbs === 0) {
+    yield {
+      type: "error",
+      message: "Nenhum item ativo encontrado no cache (rode 'todos os itens' pelo menos uma vez antes de usar este filtro).",
+    };
+    return;
+  }
 
   const runId = resumeRunId ?? randomUUID();
   let jaProcessados = new Set<string>();
