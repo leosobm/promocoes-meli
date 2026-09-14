@@ -75,6 +75,7 @@ interface DecisionInsertRow {
   campanha_anterior_margem_pct?: number | null;
   campanha_anterior_score?: number | null;
   sku_referencia?: string | null;
+  stock_sugerido?: number | null;
   variacoes?: VariacaoResultado[] | null;
   score?: number | null;
   escolhida?: boolean;
@@ -275,6 +276,7 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
     score: number;
     rejeitada: string | null;
     variacoes: VariacaoResultado[] | null;
+    stockSugerido: number | null;
   }[] = [];
 
   for (const promo of promotions) {
@@ -284,6 +286,36 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
     const descontoTarifaPctFrac = tarifaEstimada?.pctFrac ?? 0;
     const descontoTarifaValor = tarifaEstimada?.valor ?? 0;
     const priceCtx = { freteMedio, taxasPct: ctx.taxasPct, comissaoPct, descontoTarifaPct: descontoTarifaPctFrac };
+
+    // LIGHTNING exige reservar um "stock" no join (faixa min/max devolvida
+    // pela própria API) — sem mandar esse campo, o Mercado Livre rejeita
+    // com "Stock must be greater than X and less than Y" na hora de
+    // aderir, mesmo com a decisão já calculada e aprovada na revisão. Usa
+    // o estoque disponível do anúncio, limitado ao máximo aceito pela
+    // campanha; se nem o mínimo exigido couber no estoque disponível, a
+    // campanha é rejeitada aqui (evita chegar em "escolhida" pra só falhar
+    // depois, na hora de aplicar).
+    let stockSugerido: number | null = null;
+    let estoqueInsuficiente: string | null = null;
+    if (typeCfg.extraJoinFields === "stock") {
+      const min = promo.stock?.min ?? null;
+      const max = promo.stock?.max ?? null;
+      const disponivel = detail.available_quantity ?? null;
+      if (min != null && max != null && disponivel != null) {
+        stockSugerido = Math.min(disponivel, max);
+        if (stockSugerido < min) {
+          estoqueInsuficiente = `Estoque disponível do anúncio (${disponivel}) é menor que o mínimo exigido pela campanha (${min}) — não é possível aderir.`;
+          stockSugerido = null;
+        }
+      }
+    }
+    if (estoqueInsuficiente) {
+      evaluated.push({
+        promo, preco: 0, margemPct: -Infinity, margemAoVivoPct: null, skuReferencia: null, descontoPct: 0,
+        mlPct, mlFonte, score: 0, rejeitada: estoqueInsuficiente, variacoes: null, stockSugerido: null,
+      });
+      continue;
+    }
 
     let preco: number;
     let margemAoVivoPct: number | null = null;
@@ -303,7 +335,7 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
       if (erroImpossivel) {
         evaluated.push({
           promo, preco: 0, margemPct: -Infinity, margemAoVivoPct: null, skuReferencia: null, descontoPct: 0,
-          mlPct, mlFonte, score: 0, rejeitada: erroImpossivel, variacoes: null,
+          mlPct, mlFonte, score: 0, rejeitada: erroImpossivel, variacoes: null, stockSugerido,
         });
         continue;
       }
@@ -345,7 +377,7 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
           promo, preco: 0, margemPct: -Infinity, margemAoVivoPct: null, skuReferencia: null, descontoPct: 0,
           mlPct, mlFonte, score: 0,
           rejeitada: "Campanha sem preço definido pela API e sem dados suficientes para calcular (tipo sem preço por item).",
-          variacoes: null,
+          variacoes: null, stockSugerido,
         });
         continue;
       }
@@ -379,14 +411,14 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
     if (rejeitadaPorRow) {
       evaluated.push({
         promo, preco, margemPct: pior!.margemFrac, margemAoVivoPct, skuReferencia: pior!.row.sku || null,
-        descontoPct, mlPct, mlFonte, score, rejeitada: rejeitadaPorRow, variacoes,
+        descontoPct, mlPct, mlFonte, score, rejeitada: rejeitadaPorRow, variacoes, stockSugerido,
       });
       continue;
     }
 
     evaluated.push({
       promo, preco, margemPct: pior!.margemFrac, margemAoVivoPct, skuReferencia: pior!.row.sku || null,
-      descontoPct, mlPct, mlFonte, score, rejeitada: null, variacoes,
+      descontoPct, mlPct, mlFonte, score, rejeitada: null, variacoes, stockSugerido,
     });
   }
 
@@ -581,6 +613,7 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
       campanha_anterior_margem_pct: ehTroca ? ativaEntry!.margemAoVivoPct ?? ativaEntry!.margemPct * 100 : null,
       campanha_anterior_score: ehTroca && !ehAtualizacaoDePreco ? ativaEntry!.score : null,
       sku_referencia: e.skuReferencia,
+      stock_sugerido: e.stockSugerido,
       variacoes: e.variacoes,
       score: e.score,
       escolhida: isEscolhida,

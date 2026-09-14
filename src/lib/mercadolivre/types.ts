@@ -52,6 +52,10 @@ export interface ItemPromotion {
   meli_percentage?: number | null;
   seller_percentage?: number | null;
   benefits?: { meli_percent?: number | null } | null;
+  // Só presente em tipos com reserva de estoque pra campanha (LIGHTNING) —
+  // min/max = faixa aceita pela API no join; remaining_stock = quanto
+  // ainda resta reservado numa oferta já ativa.
+  stock?: { min?: number; max?: number; remaining_stock?: number } | null;
   raw?: unknown;
 }
 
@@ -59,6 +63,7 @@ export interface ItemDetail {
   id: string;
   title?: string;
   price?: number;
+  available_quantity?: number;
   category_id?: string;
   listing_type_id?: string;
   status?: string;

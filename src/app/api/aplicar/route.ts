@@ -124,6 +124,7 @@ export async function POST(request: NextRequest) {
     const r = await client.joinItem(d.mlb, d.promotion_id, d.promotion_type, {
       dealPrice: typeCfg.priceMode === "seller_defined" ? d.preco_proposto ?? undefined : undefined,
       offerId: d.offer_id ?? undefined,
+      stock: typeCfg.extraJoinFields === "stock" ? d.stock_sugerido ?? undefined : undefined,
     });
 
     // 2xx não é garantia de que o preço pedido realmente "colou" — visto
