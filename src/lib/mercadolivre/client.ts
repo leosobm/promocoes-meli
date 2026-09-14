@@ -199,7 +199,16 @@ export class MercadoLivreClient {
         const promotionId = (p.promotion_id ?? p.id) as string | undefined;
         const promotionType = (p.promotion_type ?? p.type) as string | undefined;
         if (!promotionId || !promotionType) return null; // sem os dois, não dá pra identificar a promoção com segurança
-        return { ...(p as object), promotion_id: promotionId, promotion_type: promotionType, raw: p };
+        // Esse endpoint identifica a OFERTA com o campo `ref_id` (confirmado
+        // na prática em todos os tipos testados: SMART, PRE_NEGOTIATED,
+        // PRICE_MATCHING, LIGHTNING) — nunca `offer_id`, apesar desse ser o
+        // nome usado pela doc/outros endpoints (ex.: consulta de itens por
+        // campanha). Sem esse mapeamento, offer_id fica vazio e o DELETE de
+        // saída de campanha (leaveItem) falha com "Offer id is required"
+        // pros tipos que exigem esse campo — bug real visto em produção
+        // (~2000 decisões de troca com campanha_anterior_offer_id nulo).
+        const offerId = (p.offer_id ?? p.ref_id) as string | undefined;
+        return { ...(p as object), promotion_id: promotionId, promotion_type: promotionType, offer_id: offerId, raw: p };
       })
       .filter((p): p is ItemPromotion => p !== null);
   }
