@@ -18,6 +18,7 @@ export default async function PainelPage() {
       .select(DECISION_FIELDS)
       .eq("escolhida", true)
       .eq("status", "pendente")
+      .neq("recomendacao", "mantida") // nada pra revisar quando a campanha atual já é a melhor
       .order("mlb", { ascending: true })
       .range(from, to);
     if (latestRunId) q = q.eq("run_id", latestRunId);
