@@ -63,7 +63,13 @@ function Section({
                   <td className="p-2.5 text-right">{fmtPct(r.margem_calculada_pct)}</td>
                   <td className="p-2.5 text-right">
                     {r.reducao_tarifa ? (
-                      <span className="text-green-700">{fmtMoney(r.reducao_tarifa_valor)}</span>
+                      r.reducao_tarifa_fonte === "estimada_meli_percentage" ? (
+                        <span className="text-amber-700" title="Estimado a partir de meli_percentage — API não confirma este valor.">
+                          ~{fmtMoney(r.reducao_tarifa_valor)}
+                        </span>
+                      ) : (
+                        <span className="text-green-700">{fmtMoney(r.reducao_tarifa_valor)}</span>
+                      )
                     ) : (
                       <span className="text-neutral-400">-</span>
                     )}

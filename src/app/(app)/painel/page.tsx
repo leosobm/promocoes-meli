@@ -4,7 +4,7 @@ import PainelClient from "@/components/PainelClient";
 import type { DecisionRow } from "@/components/DecisionTable";
 
 const DECISION_FIELDS =
-  "id, mlb, promotion_id, promotion_type, preco_proposto, preco_original, margem_calculada_pct, desconto_consumidor_pct, ml_participacao_pct, ml_participacao_fonte, reducao_tarifa, reducao_tarifa_pct, reducao_tarifa_valor, troca, campanha_anterior_tipo, campanha_anterior_margem_pct, campanha_anterior_score, recomendacao, sku_referencia, score, gravavel, motivo, status, created_at";
+  "id, mlb, promotion_id, promotion_type, preco_proposto, preco_original, margem_calculada_pct, desconto_consumidor_pct, ml_participacao_pct, ml_participacao_fonte, reducao_tarifa, reducao_tarifa_pct, reducao_tarifa_valor, reducao_tarifa_fonte, troca, campanha_anterior_tipo, campanha_anterior_margem_pct, campanha_anterior_score, recomendacao, sku_referencia, score, gravavel, motivo, status, created_at";
 
 export default async function PainelPage() {
   const supabase = await createServerSupabase();

@@ -67,6 +67,7 @@ interface DecisionInsertRow {
   reducao_tarifa?: boolean;
   reducao_tarifa_pct?: number | null;
   reducao_tarifa_valor?: number | null;
+  reducao_tarifa_fonte?: string | null;
   troca?: boolean;
   campanha_anterior_id?: string | null;
   campanha_anterior_tipo?: string | null;
@@ -110,6 +111,48 @@ function extractMlParticipacao(p: ItemPromotion): { pct: number | null; fonte: s
   const meliPct = p.meli_percentage ?? p.benefits?.meli_percent ?? null;
   if (meliPct != null) return { pct: meliPct / 100, fonte: "meli_percentage" };
   return { pct: null, fonte: null };
+}
+
+// Pontos percentuais de segurança subtraídos de meli_percentage ao estimar
+// redução de tarifa sem confirmação da API — ver chamado aberto com o
+// suporte do Mercado Livre: boosted_offer/discount_meli_boost_amount não
+// aparecem de forma confiável nem em ofertas já ativas, mas o painel
+// mostra um valor de redução real desde antes da adesão. Testamos
+// meli_percentage × preço original contra o painel em 9 casos reais:
+// bateu exato em 2, ficou a poucos centavos em 6, e errou por R$0,32 em 1
+// (desvio de ~12%, o pior caso observado). 1.5pp de gordura cobre
+// folgadamente esse desvio, mantendo a estimativa conservadora (nunca
+// superestima a redução o suficiente pra violar o piso de margem).
+const GORDURA_MELI_PERCENTAGE_PP = 1.5;
+
+interface TarifaReducaoEstimada {
+  valor: number;
+  pctFrac: number;
+  fonte: "api_confirmada" | "estimada_meli_percentage";
+}
+
+/** Redução de tarifa (comissão) de uma oferta: usa o valor exato da API
+ * quando presente (discount_meli_boost_amount); na ausência dele, estima
+ * a partir de meli_percentage com a gordura de segurança acima. Retorna
+ * null quando não há nenhum sinal de redução (ou a gordura zera a
+ * estimativa). */
+function estimarReducaoTarifa(promo: ItemPromotion): TarifaReducaoEstimada | null {
+  if (promo.discount_meli_boost_amount != null) {
+    return {
+      valor: promo.discount_meli_boost_amount,
+      pctFrac: (promo.discount_meli_boosted_percentage ?? 0) / 100,
+      fonte: "api_confirmada",
+    };
+  }
+  const meliPct = promo.meli_percentage ?? promo.benefits?.meli_percent ?? null;
+  if (meliPct == null || promo.original_price == null) return null;
+  const pctComGordura = Math.max(0, meliPct - GORDURA_MELI_PERCENTAGE_PP);
+  if (pctComGordura === 0) return null;
+  return {
+    valor: (pctComGordura / 100) * promo.original_price,
+    pctFrac: pctComGordura / 100,
+    fonte: "estimada_meli_percentage",
+  };
 }
 
 /** Preço mínimo necessário pra UMA variação atingir sua margem-alvo (ou, se
@@ -237,8 +280,9 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
   for (const promo of promotions) {
     const typeCfg = getCampaignTypeConfig(promo.promotion_type);
     const { pct: mlPct, fonte: mlFonte } = extractMlParticipacao(promo);
-    const descontoTarifaPctFrac = mlFonte === "discount_meli_boosted_percentage" ? (mlPct ?? 0) : 0;
-    const descontoTarifaValor = promo.discount_meli_boost_amount ?? 0;
+    const tarifaEstimada = estimarReducaoTarifa(promo);
+    const descontoTarifaPctFrac = tarifaEstimada?.pctFrac ?? 0;
+    const descontoTarifaValor = tarifaEstimada?.valor ?? 0;
     const priceCtx = { freteMedio, taxasPct: ctx.taxasPct, comissaoPct, descontoTarifaPct: descontoTarifaPctFrac };
 
     let preco: number;
@@ -281,7 +325,7 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
           for (const row of rows) {
             const m = calcMargemResultante({
               preco: precoAoVivo, cmv: row.cmv, freteMedio, comissaoPct,
-              taxasPct: ctx.taxasPct, descontoTarifaValor: promo.discount_meli_boost_amount ?? 0,
+              taxasPct: ctx.taxasPct, descontoTarifaValor: tarifaEstimada?.valor ?? 0,
             });
             if (m < piorAoVivo) piorAoVivo = m;
             if (m < row.margem_minima_pct / 100) aoVivoSeguro = false;
@@ -435,6 +479,7 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
     const ehAtualizacaoDePreco = ehTroca && isAtivaAtual && atualizaPrecoMesmaCampanha;
     const ehTolerancia = melhorTolerancia !== null && e.promo.promotion_id === melhorTolerancia.promo.promotion_id;
     const refTxt = e.skuReferencia ? ` (referência: SKU ${e.skuReferencia}, a de menor margem entre ${rows.length} variação(ões))` : "";
+    const tarifaEstimada = estimarReducaoTarifa(e.promo);
 
     let motivo: string;
     if (ehTolerancia) {
@@ -500,12 +545,10 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
       desconto_consumidor_pct: e.descontoPct * 100,
       ml_participacao_pct: e.mlPct != null ? e.mlPct * 100 : null,
       ml_participacao_fonte: e.mlFonte,
-      reducao_tarifa:
-        !!e.promo.boosted_offer ||
-        e.promo.discount_meli_boosted_percentage != null ||
-        e.promo.discount_meli_boost_amount != null,
-      reducao_tarifa_pct: e.promo.discount_meli_boosted_percentage ?? null,
-      reducao_tarifa_valor: e.promo.discount_meli_boost_amount ?? null,
+      reducao_tarifa: !!e.promo.boosted_offer || tarifaEstimada !== null,
+      reducao_tarifa_pct: tarifaEstimada ? tarifaEstimada.pctFrac * 100 : null,
+      reducao_tarifa_valor: tarifaEstimada?.valor ?? null,
+      reducao_tarifa_fonte: tarifaEstimada?.fonte ?? null,
       troca: ehTroca,
       campanha_anterior_id: ehTroca ? ativaEntry!.promo.promotion_id : null,
       campanha_anterior_tipo: ehTroca ? ativaEntry!.promo.promotion_type : null,

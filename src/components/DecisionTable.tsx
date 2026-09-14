@@ -17,6 +17,7 @@ export interface DecisionRow {
   reducao_tarifa: boolean;
   reducao_tarifa_pct: number | null;
   reducao_tarifa_valor: number | null;
+  reducao_tarifa_fonte: string | null;
   troca: boolean;
   campanha_anterior_tipo: string | null;
   campanha_anterior_margem_pct: number | null;
@@ -388,7 +389,19 @@ export default function DecisionTable({
                 <td className="p-3 text-right">{fmtPct(r.desconto_consumidor_pct)}</td>
                 <td className="p-3 text-right">{fmtPct(r.margem_calculada_pct)}</td>
                 <td className="p-3 text-right">
-                  {r.reducao_tarifa ? <span className="text-green-700">{fmtMoney(r.reducao_tarifa_valor)}</span> : <span className="text-neutral-400">-</span>}
+                  {r.reducao_tarifa ? (
+                    r.reducao_tarifa_fonte === "estimada_meli_percentage" ? (
+                      <span className="text-amber-700" title="Estimado a partir de meli_percentage (gordura de 1,5pp) — API não confirma este valor.">
+                        ~{fmtMoney(r.reducao_tarifa_valor)}
+                      </span>
+                    ) : (
+                      <span className="text-green-700" title="Valor exato confirmado pela API (discount_meli_boost_amount).">
+                        {fmtMoney(r.reducao_tarifa_valor)}
+                      </span>
+                    )
+                  ) : (
+                    <span className="text-neutral-400">-</span>
+                  )}
                 </td>
                 <td className="p-3 text-right">{r.score?.toFixed(1) ?? "-"}</td>
                 <td className="max-w-xs p-3 text-xs text-neutral-600">{r.motivo}</td>

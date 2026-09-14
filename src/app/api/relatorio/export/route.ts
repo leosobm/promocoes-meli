@@ -16,6 +16,7 @@ function toSheetRows(rows: DecisionReportRow[]) {
     "Incentivo ML (redução de tarifa)": r.reducao_tarifa ? "Sim" : "Não",
     "Red. Tarifa (%)": r.reducao_tarifa_pct ?? "",
     "Red. Tarifa (R$)": r.reducao_tarifa_valor ?? "",
+    "Red. Tarifa (fonte)": r.reducao_tarifa_fonte === "estimada_meli_percentage" ? "Estimada" : r.reducao_tarifa_fonte === "api_confirmada" ? "Confirmada (API)" : "",
     Troca: r.troca ? "Sim" : "Não",
     "Campanha Anterior": r.campanha_anterior_tipo ?? "",
     "Margem Anterior (%)": r.campanha_anterior_margem_pct ?? "",

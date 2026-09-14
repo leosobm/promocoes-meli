@@ -18,7 +18,7 @@ export default async function HistoricoPage() {
   const supabase = await createServerSupabase();
   const { data: decisions } = await supabase
     .from("campaign_decisions")
-    .select("id, mlb, promotion_type, preco_proposto, margem_calculada_pct, reducao_tarifa, reducao_tarifa_valor, troca, campanha_anterior_tipo, status, motivo, created_at, applied_at")
+    .select("id, mlb, promotion_type, preco_proposto, margem_calculada_pct, reducao_tarifa, reducao_tarifa_valor, reducao_tarifa_fonte, troca, campanha_anterior_tipo, status, motivo, created_at, applied_at")
     .neq("status", "pendente")
     .order("created_at", { ascending: false })
     .limit(500);
@@ -64,7 +64,13 @@ export default async function HistoricoPage() {
                 </td>
                 <td className="p-3 text-right">
                   {d.reducao_tarifa ? (
-                    <span className="text-green-700">R$ {(d.reducao_tarifa_valor ?? 0).toFixed(2)}</span>
+                    d.reducao_tarifa_fonte === "estimada_meli_percentage" ? (
+                      <span className="text-amber-700" title="Estimado a partir de meli_percentage (gordura de 1,5pp) — API não confirma este valor.">
+                        ~R$ {(d.reducao_tarifa_valor ?? 0).toFixed(2)}
+                      </span>
+                    ) : (
+                      <span className="text-green-700">R$ {(d.reducao_tarifa_valor ?? 0).toFixed(2)}</span>
+                    )
                   ) : (
                     <span className="text-neutral-400">-</span>
                   )}
