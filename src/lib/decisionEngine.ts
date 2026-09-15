@@ -287,15 +287,16 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
     const descontoTarifaValor = tarifaEstimada?.valor ?? 0;
     const priceCtx = { freteMedio, taxasPct: ctx.taxasPct, comissaoPct, descontoTarifaPct: descontoTarifaPctFrac };
 
-    // LIGHTNING exige reservar um "stock" no join (faixa min/max devolvida
-    // pela própria API) — sem mandar esse campo, o Mercado Livre rejeita
-    // com "Stock must be greater than X and less than Y" na hora de
-    // aderir, mesmo com a decisão já calculada e aprovada na revisão.
-    // Reserva só o MÍNIMO exigido pela campanha (não o estoque disponível
-    // inteiro) — comprometer o mínimo necessário deixa o resto do estoque
-    // livre pra venda normal fora da oferta relâmpago. Se nem o mínimo
-    // couber no estoque disponível, a campanha é rejeitada aqui (evita
-    // chegar em "escolhida" pra só falhar depois, na hora de aplicar).
+    // LIGHTNING exige reservar um "stock" no join, dentro de uma faixa
+    // ABERTA (exclusiva nas duas pontas) devolvida pela própria API — a
+    // mensagem de erro real é literal: "Stock must be greater than X and
+    // less than Y", ou seja, min e max NÃO são valores aceitos, só o que
+    // fica estritamente entre eles (visto na prática: min=5 rejeitou com
+    // stock=5, só aceitou a partir de 6). Reserva o mínimo utilizável
+    // (min + 1), não o estoque disponível inteiro — deixa o resto livre
+    // pra venda normal fora da oferta relâmpago. Rejeita de cara quando
+    // nem esse mínimo cabe no estoque disponível ou quando a faixa é
+    // estreita demais pra ter algum valor válido no meio.
     let stockSugerido: number | null = null;
     let estoqueInsuficiente: string | null = null;
     if (typeCfg.extraJoinFields === "stock") {
@@ -303,10 +304,13 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
       const max = promo.stock?.max ?? null;
       const disponivel = detail.available_quantity ?? null;
       if (min != null && max != null && disponivel != null) {
-        stockSugerido = min;
-        if (disponivel < min) {
-          estoqueInsuficiente = `Estoque disponível do anúncio (${disponivel}) é menor que o mínimo exigido pela campanha (${min}) — não é possível aderir.`;
-          stockSugerido = null;
+        const minUtilizavel = min + 1;
+        if (minUtilizavel >= max) {
+          estoqueInsuficiente = `Faixa de estoque da campanha (entre ${min} e ${max}, exclusive) não deixa nenhum valor válido.`;
+        } else if (disponivel < minUtilizavel) {
+          estoqueInsuficiente = `Estoque disponível do anúncio (${disponivel}) é menor que o mínimo utilizável pela campanha (${minUtilizavel}, já que ${min} não é aceito) — não é possível aderir.`;
+        } else {
+          stockSugerido = minUtilizavel;
         }
       }
     }
