@@ -565,10 +565,23 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
       const margemAntesTroca = ativaEntry!.margemAoVivoPct ?? ativaEntry!.margemPct * 100;
       const deltaMargem = e.margemPct * 100 - margemAntesTroca;
       const deltaDesconto = (e.descontoPct - ativaEntry!.descontoPct) * 100;
+      const precoAoVivoTroca = ativaEntry!.promo.total_price_for_boosted_offer ?? ativaEntry!.promo.price ?? null;
+      const ehDiminuicaoTroca = precoAoVivoTroca != null && e.preco < precoAoVivoTroca;
+      // Preço menor: não precisa sair da anterior — a nova (mais barata)
+      // já prevalece sozinha (o ML mostra o menor preço entre as ofertas
+      // ativas do item), e a anterior fica como "backup" pra retomar
+      // automaticamente quando a nova expirar (pensado pra LIGHTNING, de
+      // curta duração). Preço maior: só sair da anterior faz a nova
+      // realmente entrar em vigor, já que a anterior (mais barata)
+      // continuaria prevalecendo se ficasse ativa junto.
+      const mecanismo = ehDiminuicaoTroca
+        ? `mantém ${ativaEntry!.promo.promotion_type} ativa como backup (retoma sozinha quando a nova expirar) e entra em`
+        : `sai de ${ativaEntry!.promo.promotion_type} e entra em`;
       motivo =
-        `Troca recomendada: sair de ${ativaEntry!.promo.promotion_type} (margem ${margemAntesTroca.toFixed(1)}%, ` +
-        `desconto ${(ativaEntry!.descontoPct * 100).toFixed(1)}%, score ${ativaEntry!.score.toFixed(1)}) e entrar em ${e.promo.promotion_type} ` +
+        `Troca recomendada: ${mecanismo} ${e.promo.promotion_type} ` +
         `(margem ${(e.margemPct * 100).toFixed(1)}%, desconto ${(e.descontoPct * 100).toFixed(1)}%, score ${e.score.toFixed(1)}) — ` +
+        `vinha de ${ativaEntry!.promo.promotion_type} (margem ${margemAntesTroca.toFixed(1)}%, ` +
+        `desconto ${(ativaEntry!.descontoPct * 100).toFixed(1)}%, score ${ativaEntry!.score.toFixed(1)}), ` +
         `margem ${deltaMargem >= 0 ? "+" : ""}${deltaMargem.toFixed(1)}pp, desconto ${deltaDesconto >= 0 ? "+" : ""}${deltaDesconto.toFixed(1)}pp.${refTxt}`;
     } else if (isEscolhida && isAtivaAtual && switchBlockedReason) {
       motivo = `Mantida (troca bloqueada): ${switchBlockedReason}${refTxt}`;

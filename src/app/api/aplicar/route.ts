@@ -94,10 +94,19 @@ export async function POST(request: NextRequest) {
       continue;
     }
 
-    // Troca: sai da campanha anterior ANTES de entrar na nova — não tenta
-    // aderir com a antiga ainda ativa (payload errado poderia fixar preço
-    // promocional incorreto num item que já está com outro preço vigente).
-    if (d.troca && d.campanha_anterior_id) {
+    // Troca com DIMINUIÇÃO de preço, entre campanhas DIFERENTES: não sai da
+    // anterior — a nova (mais barata) já prevalece sozinha (o ML mostra o
+    // menor preço entre as ofertas ativas do item), e a anterior fica como
+    // "backup" pra retomar automaticamente quando a nova expirar (pensado
+    // pra LIGHTNING, de curta duração). Isso NÃO se aplica a atualização de
+    // preço dentro da MESMA campanha (campanha_anterior_id === promotion_id
+    // — aí sair e reentrar é o único jeito de mudar o preço, não uma
+    // escolha de negócio) nem a trocas com AUMENTO de preço, onde só sair
+    // da anterior (mais barata) faz a nova realmente entrar em vigor.
+    const ehTrocaEntreCampanhasDiferentes = d.troca && d.campanha_anterior_id && d.campanha_anterior_id !== d.promotion_id;
+    const mantemAnteriorComoBackup = ehTrocaEntreCampanhasDiferentes && d.recomendacao === "diminuir_preco";
+
+    if (d.troca && d.campanha_anterior_id && !mantemAnteriorComoBackup) {
       const leave = await client.leaveItem(d.mlb, d.campanha_anterior_id, d.campanha_anterior_tipo, {
         offerId: d.campanha_anterior_offer_id ?? undefined,
         currentStatus: "active",
@@ -141,6 +150,10 @@ export async function POST(request: NextRequest) {
     if (precoDivergente) {
       motivoFinal += ` | ATENÇÃO: pedimos R$ ${d.preco_proposto.toFixed(2)}, API confirmou R$ ${Number(respostaPreco).toFixed(2)} — a campanha pode já estar ativa com outro preço e não ter sido atualizada. Confira no painel do ML.`;
     }
+    const backupNota = mantemAnteriorComoBackup && r.ok
+      ? ` | ${d.campanha_anterior_tipo} mantida ativa como backup — retoma sozinha quando ${d.promotion_type} expirar.`
+      : "";
+    motivoFinal += backupNota;
 
     await supabase
       .from("campaign_decisions")
@@ -154,9 +167,9 @@ export async function POST(request: NextRequest) {
 
     results.push({
       id: d.id, mlb: d.mlb, ok: r.ok && !precoDivergente,
-      detalhe: precoDivergente
+      detalhe: (precoDivergente
         ? `Aplicado mas com preço divergente (pedido R$ ${d.preco_proposto.toFixed(2)}, API confirmou R$ ${Number(respostaPreco).toFixed(2)}) — confira no ML.`
-        : JSON.stringify(r.response).slice(0, 300),
+        : JSON.stringify(r.response).slice(0, 300)) + backupNota,
     });
   }
 
