@@ -20,9 +20,14 @@ export type ProgressEvent =
   | { type: "error"; message: string };
 
 // Status da API que significam "o item JÁ está participando desta
-// campanha agora" (não é candidata nem programada) — mesmo bucket
-// "Participando" do mercadolivre_promocoes.py original.
-const ACTIVE_STATUSES = new Set(["accepted", "active", "started", "joined", "in_progress"]);
+// campanha" — inclui "pending" (documentado como "aprovada e programada",
+// ex.: LIGHTNING aceita mas aguardando a janela começar). Sem isso, uma
+// oferta recém-aceita e ainda pending não era reconhecida como já ativa: o
+// motor recalculava como se fosse nova adesão, e nessa hora a API já não
+// devolve mais stock.min/max pra essa entrada (só remaining_stock),
+// gerando stock_sugerido nulo e uma segunda tentativa de join falhando
+// com "Stock must be greater than X and less than Y" (visto em produção).
+const ACTIVE_STATUSES = new Set(["accepted", "active", "started", "joined", "in_progress", "pending"]);
 
 // Quantos MLBs processar em paralelo — cada um faz ~4 chamadas à API do ML
 // (detalhe do item, comissão, frete grátis, promoções). Sequencial não cabe
