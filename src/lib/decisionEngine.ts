@@ -582,14 +582,18 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
       motivo = `Válida (margem ${(e.margemPct * 100).toFixed(1)}%${refTxt}) mas superada por outra campanha com pontuação maior (${recomendada?.score.toFixed(1)}).`;
     }
 
+    // Troca de campanha não é uma categoria de movimentação própria — é só
+    // o mecanismo (sair de uma campanha, entrar noutra) por trás de um
+    // aumento ou diminuição de preço. Classifica pelo mesmo critério tanto
+    // pra atualização de preço na mesma campanha quanto pra troca de fato:
+    // compara o novo preço com o preço ao vivo da campanha anterior.
     let recomendacao: string;
     if (ehTolerancia) recomendacao = "tolerancia";
     else if (e.rejeitada) recomendacao = "rejeitada";
-    else if (ehAtualizacaoDePreco) {
+    else if (ehTroca) {
       const precoAoVivo = ativaEntry!.promo.total_price_for_boosted_offer ?? ativaEntry!.promo.price ?? null;
       recomendacao = precoAoVivo != null && e.preco < precoAoVivo ? "diminuir_preco" : "aumentar_preco";
-    } else if (ehTroca) recomendacao = "troca_campanha";
-    else if (isEscolhida && isAtivaAtual) recomendacao = "mantida";
+    } else if (isEscolhida && isAtivaAtual) recomendacao = "mantida";
     else if (isEscolhida) recomendacao = "nova_adesao";
     else recomendacao = "superada";
 

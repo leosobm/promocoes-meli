@@ -35,7 +35,6 @@ export interface DecisionRow {
 
 const RECOMENDACAO_LABEL: Record<string, string> = {
   nova_adesao: "Nova adesão",
-  troca_campanha: "Troca de campanha",
   diminuir_preco: "Diminuir preço",
   aumentar_preco: "Aumentar preço",
   mantida: "Mantida",
@@ -46,7 +45,6 @@ const RECOMENDACAO_LABEL: Record<string, string> = {
 
 const RECOMENDACAO_COLOR: Record<string, string> = {
   nova_adesao: "bg-blue-100 text-blue-800",
-  troca_campanha: "bg-purple-100 text-purple-800",
   diminuir_preco: "bg-green-100 text-green-800",
   aumentar_preco: "bg-amber-100 text-amber-800",
   mantida: "bg-neutral-100 text-neutral-600",
