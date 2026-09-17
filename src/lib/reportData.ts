@@ -53,15 +53,22 @@ export interface RunReport {
   paraRevisao: DecisionReportRow[];
 }
 
-/** Id da rodada de "Atualizar agora" mais recente (null se nunca rodou). */
+/** Id da rodada de "Atualizar agora" mais recente (null se nunca rodou).
+ * Loga qualquer erro de consulta (ex.: timeout) em vez de engolir
+ * silenciosamente — sem isso, uma falha de banco vira indistinguível de
+ * "nunca rodou nenhuma atualização" pro usuário (bug real já visto em
+ * produção: timeout por falta de índice em created_at). */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function getLatestRunId(supabase: SupabaseClient<any>): Promise<string | null> {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("campaign_decisions")
     .select("run_id, created_at")
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
+  if (error) {
+    console.error("getLatestRunId: falha ao consultar campaign_decisions:", error.message);
+  }
   return data?.run_id ?? null;
 }
 
