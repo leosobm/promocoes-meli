@@ -1,7 +1,10 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const PUBLIC_PATHS = ["/login", "/definir-senha", "/api/mercadolivre/callback"];
+// /api/cron precisa ficar de fora do redirect de login — quem chama é a
+// própria Vercel (Cron Jobs), sem cookie de sessão nenhum. A rota se
+// protege sozinha conferindo o header Authorization contra CRON_SECRET.
+const PUBLIC_PATHS = ["/login", "/definir-senha", "/api/mercadolivre/callback", "/api/cron"];
 
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request });
