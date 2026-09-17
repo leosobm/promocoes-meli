@@ -119,17 +119,18 @@ function extractMlParticipacao(p: ItemPromotion): { pct: number | null; fonte: s
   return { pct: null, fonte: null };
 }
 
-// Pontos percentuais de segurança subtraídos de meli_percentage ao estimar
-// redução de tarifa sem confirmação da API — ver chamado aberto com o
-// suporte do Mercado Livre: boosted_offer/discount_meli_boost_amount não
-// aparecem de forma confiável nem em ofertas já ativas, mas o painel
-// mostra um valor de redução real desde antes da adesão. Testamos
-// meli_percentage × preço original contra o painel em 9 casos reais:
-// bateu exato em 2, ficou a poucos centavos em 6, e errou por R$0,32 em 1
-// (desvio de ~12%, o pior caso observado). 1.5pp de gordura cobre
-// folgadamente esse desvio, mantendo a estimativa conservadora (nunca
-// superestima a redução o suficiente pra violar o piso de margem).
-const GORDURA_MELI_PERCENTAGE_PP = 1.5;
+// Corte de segurança aplicado sobre o VALOR estimado de redução de tarifa
+// (não sobre o percentual meli_percentage em si) ao estimar sem
+// confirmação da API — ver chamado aberto com o suporte do Mercado Livre:
+// boosted_offer/discount_meli_boost_amount não aparecem de forma
+// confiável nem em ofertas já ativas, mas o painel mostra um valor de
+// redução real desde antes da adesão. Testamos meli_percentage × preço
+// original contra o painel em 9 casos reais: bateu exato em 2, ficou a
+// poucos centavos em 6, e errou por R$0,32 em 1 (desvio de ~12%, o pior
+// caso observado). Um corte de 1.5% sobre o valor NÃO cobre esse pior
+// caso (ainda superestimaria por ~10% nele) — decisão consciente de
+// aceitar esse risco residual em troca de mais precisão nos demais casos.
+const GORDURA_VALOR_FRAC = 0.015;
 
 interface TarifaReducaoEstimada {
   valor: number;
@@ -139,9 +140,8 @@ interface TarifaReducaoEstimada {
 
 /** Redução de tarifa (comissão) de uma oferta: usa o valor exato da API
  * quando presente (discount_meli_boost_amount); na ausência dele, estima
- * a partir de meli_percentage com a gordura de segurança acima. Retorna
- * null quando não há nenhum sinal de redução (ou a gordura zera a
- * estimativa). */
+ * a partir de meli_percentage com o corte de segurança acima. Retorna
+ * null quando não há nenhum sinal de redução (nem exato nem estimável). */
 function estimarReducaoTarifa(promo: ItemPromotion): TarifaReducaoEstimada | null {
   if (promo.discount_meli_boost_amount != null) {
     return {
@@ -152,11 +152,11 @@ function estimarReducaoTarifa(promo: ItemPromotion): TarifaReducaoEstimada | nul
   }
   const meliPct = promo.meli_percentage ?? promo.benefits?.meli_percent ?? null;
   if (meliPct == null || promo.original_price == null) return null;
-  const pctComGordura = Math.max(0, meliPct - GORDURA_MELI_PERCENTAGE_PP);
-  if (pctComGordura === 0) return null;
+  const valorBruto = (meliPct / 100) * promo.original_price;
+  const valor = valorBruto * (1 - GORDURA_VALOR_FRAC);
   return {
-    valor: (pctComGordura / 100) * promo.original_price,
-    pctFrac: pctComGordura / 100,
+    valor,
+    pctFrac: valor / promo.original_price,
     fonte: "estimada_meli_percentage",
   };
 }
