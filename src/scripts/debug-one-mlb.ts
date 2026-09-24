@@ -21,7 +21,7 @@ async function main() {
 
   const { data: settingsRowRaw } = await supabase
     .from("app_settings")
-    .select("taxas_pct, peso_desconto_pct, peso_ml_pct, peso_margem_pct, margem_tolerancia_pct")
+    .select("taxas_pct, peso_desconto_pct, peso_ml_pct, peso_margem_pct, margem_tolerancia_pct, margem_minima_pct, margem_alvo_pct")
     .eq("id", 1)
     .single();
   if (!settingsRowRaw) {
@@ -29,17 +29,28 @@ async function main() {
     process.exit(1);
   }
   const settingsRow = settingsRowRaw;
-  const { data: rows } = await supabase
+  const { data: rawRows } = await supabase
     .from("item_config")
     .select("mlb, sku, cmv, margem_minima_pct, margem_alvo_pct")
     .eq("mlb", mlb);
 
-  if (!rows || rows.length === 0) {
+  if (!rawRows || rawRows.length === 0) {
     console.error(`Nenhuma linha em item_config para ${mlb}`);
     process.exit(1);
   }
 
-  console.log(`>> item_config para ${mlb}:`, JSON.stringify(rows, null, 2));
+  // Mesma resolução de fallback que runUpdate() aplica: item sem margem
+  // própria usa a geral do sistema (ver 20260924000000_margem_geral.sql).
+  const rows = rawRows.map((r) => {
+    const margemMinimaEfetiva = r.margem_minima_pct ?? settingsRow.margem_minima_pct;
+    return {
+      ...r,
+      margem_minima_pct: margemMinimaEfetiva,
+      margem_alvo_pct: r.margem_alvo_pct ?? settingsRow.margem_alvo_pct ?? null,
+    };
+  });
+
+  console.log(`>> item_config para ${mlb} (já com fallback de margem geral aplicado):`, JSON.stringify(rows, null, 2));
 
   const client = await MercadoLivreClient.fromStore();
   const userId = await client.getUserId();

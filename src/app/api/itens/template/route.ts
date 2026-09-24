@@ -34,6 +34,16 @@ export async function GET() {
       margem_alvo_pct: "",
       participar_campanhas: "SIM",
     },
+    {
+      // Sem margem própria — usa a margem mínima/alvo geral do sistema,
+      // definida em Configurações.
+      mlb: "MLB5555555555",
+      sku: "",
+      cmv: 30,
+      margem_minima_pct: "",
+      margem_alvo_pct: "",
+      participar_campanhas: "SIM",
+    },
   ];
   const wsModelo = XLSX.utils.json_to_sheet(modeloRows, {
     header: ["mlb", "sku", "cmv", "margem_minima_pct", "margem_alvo_pct", "participar_campanhas"],
@@ -66,16 +76,16 @@ export async function GET() {
     },
     {
       Coluna: "margem_minima_pct",
-      "Obrigatório?": "Sim",
+      "Obrigatório?": "Não",
       Descrição:
-        "Margem mínima aceitável, em %. O sistema NUNCA adere a uma campanha que resulte em margem abaixo disso, sem exceção.",
+        "Margem mínima aceitável, em %. O sistema NUNCA adere a uma campanha que resulte em margem abaixo disso, sem exceção. Se vazio, usa a margem mínima GERAL definida em Configurações.",
       "Formato / Exemplo": "12  (= 12%, não 0.12)",
     },
     {
       Coluna: "margem_alvo_pct",
       "Obrigatório?": "Não",
       Descrição:
-        "Margem 'ideal', em %. Usada para CALCULAR o preço em campanhas onde você define o preço (DEAL, SELLER_CAMPAIGN, LIGHTNING, DOD). Se vazio, o sistema usa a margem mínima como alvo.",
+        "Margem 'ideal', em %. Usada para CALCULAR o preço em campanhas onde você define o preço (DEAL, SELLER_CAMPAIGN, LIGHTNING, DOD). Se vazio, usa a margem alvo GERAL de Configurações; se essa também estiver vazia, usa a margem mínima (do item ou geral) como alvo.",
       "Formato / Exemplo": "20",
     },
     {

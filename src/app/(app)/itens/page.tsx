@@ -19,9 +19,10 @@ export default async function ItensPage() {
       <div>
         <h1 className="text-xl font-semibold text-neutral-900">Itens (custo e margem)</h1>
         <p className="mt-1 text-sm text-neutral-500">
-          Envie um .csv ou .xlsx com colunas mlb, sku, cmv, margem_minima_pct, margem_alvo_pct
-          (opcional), participar_campanhas (opcional). Upload é incremental — atualiza só quem
-          está no arquivo, não apaga o resto.
+          Envie um .csv ou .xlsx com colunas mlb, sku, cmv, margem_minima_pct (opcional),
+          margem_alvo_pct (opcional), participar_campanhas (opcional). Item sem margem própria usa
+          a margem geral do sistema, definida em Configurações. Upload é incremental — atualiza só
+          quem está no arquivo, não apaga o resto.
         </p>
         <p className="mt-1 text-sm text-neutral-500">
           Item com variação (várias cores/tamanhos sob o mesmo MLB): repita o MLB numa linha por
@@ -58,8 +59,12 @@ export default async function ItensPage() {
                 <td className="p-3 font-medium">{i.mlb}</td>
                 <td className="p-3">{i.sku ?? "-"}</td>
                 <td className="p-3 text-right">R$ {i.cmv.toFixed(2)}</td>
-                <td className="p-3 text-right">{i.margem_minima_pct}%</td>
-                <td className="p-3 text-right">{i.margem_alvo_pct != null ? `${i.margem_alvo_pct}%` : "-"}</td>
+                <td className="p-3 text-right">
+                  {i.margem_minima_pct != null ? `${i.margem_minima_pct}%` : <span className="text-neutral-400">Geral do sistema</span>}
+                </td>
+                <td className="p-3 text-right">
+                  {i.margem_alvo_pct != null ? `${i.margem_alvo_pct}%` : <span className="text-neutral-400">Geral do sistema</span>}
+                </td>
                 <td className="p-3">{i.participar_campanhas ? "Sim" : "Não"}</td>
                 <td className="p-3 text-xs text-neutral-500">
                   {new Date(i.updated_at).toLocaleString("pt-BR")}

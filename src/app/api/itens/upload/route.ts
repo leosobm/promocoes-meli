@@ -6,7 +6,9 @@ import { requireAdmin } from "@/lib/auth/requireAdmin";
 
 /**
  * Aceita .csv ou .xlsx com as colunas (nomes flexíveis, ver COLUMN_ALIASES):
- *   mlb, sku?, cmv, margem_minima_pct, margem_alvo_pct?, participar_campanhas?
+ *   mlb, sku?, cmv, margem_minima_pct?, margem_alvo_pct?, participar_campanhas?
+ * margem_minima_pct/margem_alvo_pct em branco usam a margem geral do
+ * sistema (Configurações) — ver decisionEngine.ts.
  * Faz upsert em item_config pela chave composta (mlb, sku) — um MLB pode
  * aparecer em várias linhas, uma por SKU/variação (a API de Promoções do ML
  * grava o preço promocional a nível de MLB, não de variação, então o motor
@@ -19,7 +21,9 @@ const ROW_SCHEMA = z.object({
   mlb: z.string().trim().min(1, "MLB obrigatório"),
   sku: z.string().trim().default(""),
   cmv: z.coerce.number().positive("CMV deve ser > 0"),
-  margem_minima_pct: z.coerce.number().min(0).max(99, "margem_minima_pct deve estar entre 0 e 99"),
+  // Opcional: item sem margem própria usa a margem geral do sistema
+  // (Configurações) — ver decisionEngine.ts / migração margem_geral.
+  margem_minima_pct: z.coerce.number().min(0).max(99, "margem_minima_pct deve estar entre 0 e 99").optional().nullable(),
   margem_alvo_pct: z.coerce.number().min(0).max(99).optional().nullable(),
   participar_campanhas: z.boolean().default(true),
 });
@@ -78,6 +82,7 @@ export async function POST(request: NextRequest) {
       mapped.participar_campanhas = parseBool(mapped.participar_campanhas);
     }
     if (mapped.margem_alvo_pct === "") mapped.margem_alvo_pct = undefined;
+    if (mapped.margem_minima_pct === "") mapped.margem_minima_pct = undefined;
 
     const parsed = ROW_SCHEMA.safeParse(mapped);
     if (!parsed.success) {
@@ -121,7 +126,7 @@ export async function POST(request: NextRequest) {
       mlb: r.mlb,
       sku: r.sku,
       cmv: r.cmv,
-      margem_minima_pct: r.margem_minima_pct,
+      margem_minima_pct: r.margem_minima_pct ?? null,
       margem_alvo_pct: r.margem_alvo_pct ?? null,
       participar_campanhas: r.participar_campanhas,
       updated_at: new Date().toISOString(),

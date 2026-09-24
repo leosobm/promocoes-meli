@@ -9,6 +9,8 @@ interface Settings {
   peso_ml_pct: number;
   peso_margem_pct: number;
   margem_tolerancia_pct: number;
+  margem_minima_pct: number;
+  margem_alvo_pct: number | null;
 }
 
 export default function ConfigForm({ initial }: { initial: Settings }) {
@@ -18,8 +20,13 @@ export default function ConfigForm({ initial }: { initial: Settings }) {
 
   const pesoTotal = values.peso_desconto_pct + values.peso_ml_pct + values.peso_margem_pct;
 
-  function setField(field: keyof Settings, v: string) {
+  function setField(field: keyof Omit<Settings, "margem_alvo_pct">, v: string) {
     setValues((prev) => ({ ...prev, [field]: Number(v) }));
+    setSaved(false);
+  }
+
+  function setMargemAlvo(v: string) {
+    setValues((prev) => ({ ...prev, margem_alvo_pct: v === "" ? null : Number(v) }));
     setSaved(false);
   }
 
@@ -45,6 +52,43 @@ export default function ConfigForm({ initial }: { initial: Settings }) {
           onChange={(e) => setField("taxas_pct", e.target.value)}
           className="w-40 rounded-md border border-neutral-300 px-3 py-2 text-sm"
         />
+      </div>
+
+      <div>
+        <h2 className="mb-2 text-sm font-medium text-neutral-700">
+          Margem geral do sistema
+        </h2>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-1">
+            <label className="block text-xs text-neutral-500">Margem mínima geral (%)</label>
+            <input
+              type="number"
+              step="0.1"
+              min="0"
+              max="99"
+              value={values.margem_minima_pct}
+              onChange={(e) => setField("margem_minima_pct", e.target.value)}
+              className="w-full rounded-md border border-neutral-300 px-3 py-2 text-sm"
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="block text-xs text-neutral-500">Margem ideal geral (%) — opcional</label>
+            <input
+              type="number"
+              step="0.1"
+              min="0"
+              max="99"
+              value={values.margem_alvo_pct ?? ""}
+              onChange={(e) => setMargemAlvo(e.target.value)}
+              placeholder="vazio = usa a mínima"
+              className="w-full rounded-md border border-neutral-300 px-3 py-2 text-sm"
+            />
+          </div>
+        </div>
+        <p className="mt-2 text-xs text-neutral-500">
+          Usadas para qualquer item cadastrado <b>sem</b> margem própria (em Itens) — item com
+          margem definida no cadastro sempre usa a dele, nunca a geral daqui.
+        </p>
       </div>
 
       <div>

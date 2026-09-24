@@ -42,14 +42,16 @@ interface AppSettings {
   peso_ml_pct: number;
   peso_margem_pct: number;
   margem_tolerancia_pct: number;
+  margem_minima_pct: number;
+  margem_alvo_pct: number | null;
 }
 
 export interface ItemConfigRow {
   mlb: string;
   sku: string; // '' = item sem variação (ou variação não informada)
   cmv: number;
-  margem_minima_pct: number;
-  margem_alvo_pct: number | null;
+  margem_minima_pct: number; // já resolvida: do item, ou a geral do sistema se o item não tiver a sua
+  margem_alvo_pct: number | null; // já resolvida: do item, ou a geral, ou null (cai na margem mínima)
 }
 
 interface VariacaoResultado {
@@ -678,7 +680,7 @@ export async function* runUpdate(
 
   const { data: settingsRow } = await supabase
     .from("app_settings")
-    .select("taxas_pct, peso_desconto_pct, peso_ml_pct, peso_margem_pct, margem_tolerancia_pct")
+    .select("taxas_pct, peso_desconto_pct, peso_ml_pct, peso_margem_pct, margem_tolerancia_pct, margem_minima_pct, margem_alvo_pct")
     .eq("id", 1)
     .single();
   const settings = settingsRow as AppSettings;
@@ -708,7 +710,25 @@ export async function* runUpdate(
       return;
     }
     if (!page || page.length === 0) break;
-    allRows.push(...(page as ItemConfigRow[]));
+    // Item sem margem própria cadastrada usa a geral do sistema
+    // (app_settings) — a margem alvo tem um segundo fallback (a própria
+    // margem mínima já resolvida) se nem o item nem o sistema definirem uma.
+    const rawPage = page as {
+      mlb: string; sku: string; cmv: number;
+      margem_minima_pct: number | null; margem_alvo_pct: number | null;
+    }[];
+    allRows.push(
+      ...rawPage.map((r) => {
+        const margemMinimaEfetiva = r.margem_minima_pct ?? settings.margem_minima_pct;
+        return {
+          mlb: r.mlb,
+          sku: r.sku,
+          cmv: r.cmv,
+          margem_minima_pct: margemMinimaEfetiva,
+          margem_alvo_pct: r.margem_alvo_pct ?? settings.margem_alvo_pct ?? null,
+        };
+      }),
+    );
     if (page.length < 1000) break;
   }
   if (allRows.length === 0) {
