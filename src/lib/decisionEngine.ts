@@ -355,6 +355,21 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
       if (promo.min_discounted_price != null && preco < promo.min_discounted_price) preco = promo.min_discounted_price;
       if (promo.max_discounted_price != null && preco > promo.max_discounted_price) preco = promo.max_discounted_price;
 
+      // LIGHTNING tem uma validação de "credibilidade" de preço mais rígida
+      // que os outros tipos — visto em produção rejeitando com
+      // ERROR_CREDIBILITY_DISCOUNTED_PRICE mesmo com o preço dentro da
+      // faixa min/max documentada. suggested_discounted_price parece ser,
+      // na prática, o piso que a API aceita agora pra esse item — usa como
+      // piso adicional só pra esse tipo (só sobe o preço, nunca desce, e
+      // isso só ajuda a margem, não atrapalha).
+      if (
+        promo.promotion_type === "LIGHTNING" &&
+        promo.suggested_discounted_price != null &&
+        preco < promo.suggested_discounted_price
+      ) {
+        preco = promo.suggested_discounted_price;
+      }
+
       // Campanha já ATIVA (status ao vivo) e tipo onde o vendedor define o
       // preço: só recomenda MUDAR o preço vigente se (a) ele já não estiver
       // mais seguro (margem caiu abaixo do mínimo de alguma variação) ou
