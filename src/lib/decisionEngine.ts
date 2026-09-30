@@ -436,13 +436,16 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
 
   const viaveis = evaluated.filter((e) => e.rejeitada === null);
 
-  // A campanha em que o item JÁ está participando, lida ao vivo da API
-  // (status "started"/"active"/etc.) — pode ou não ser a mesma que a
-  // melhor pontuação atual. Precisa vir ANTES de `melhor` porque as duas
-  // regras de negócio abaixo (bloqueio de troca pra SELLER_CAMPAIGN e
-  // priorização de PRE_NEGOTIATED) dependem de saber qual campanha já
-  // está ativa.
-  const ativaEntry = evaluated.find((e) => ACTIVE_STATUSES.has((e.promo.status ?? "").toLowerCase())) ?? null;
+  // A(s) campanha(s) em que o item JÁ está participando, lida(s) ao vivo da
+  // API (status "started"/"active"/etc.) — pode haver mais de uma
+  // simultaneamente (ex.: troca com diminuição de preço mantém a anterior
+  // como backup de propósito, ver aplicar/route.ts). Uma resolução
+  // preliminar (a primeira encontrada) já basta pras duas regras de
+  // negócio abaixo (bloqueio de troca pra SELLER_CAMPAIGN e priorização de
+  // PRE_NEGOTIATED); a resolução definitiva (usada pra decidir troca de
+  // verdade) vem depois de calcular `melhor`, abaixo.
+  const entradasAtivas = evaluated.filter((e) => ACTIVE_STATUSES.has((e.promo.status ?? "").toLowerCase()));
+  const ativaEntryPreliminar = entradasAtivas[0] ?? null;
 
   // Regra de negócio: só recomenda TROCAR de campanha pra SELLER_CAMPAIGN
   // quando a margem da campanha ativa já caiu abaixo do tolerável (nem a
@@ -450,11 +453,11 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
   // uma troca só por pontuar mais enquanto a ativa ainda está numa margem
   // aceitável. Não afeta nova adesão (sem campanha ativa) nem quando a
   // própria ativa já é SELLER_CAMPAIGN.
-  const margemAtivaAoVivo = ativaEntry ? ativaEntry.margemAoVivoPct ?? ativaEntry.margemPct * 100 : null;
+  const margemAtivaAoVivo = ativaEntryPreliminar ? ativaEntryPreliminar.margemAoVivoPct ?? ativaEntryPreliminar.margemPct * 100 : null;
   const pisoToleradoMaisExigente = Math.max(...rows.map((row) => row.margem_minima_pct * (1 - ctx.toleranciaFrac)));
   const ativaAbaixoDoTolerable = margemAtivaAoVivo != null && margemAtivaAoVivo < pisoToleradoMaisExigente;
   const bloquearSellerCampaignComoTroca =
-    ativaEntry !== null && ativaEntry.promo.promotion_type !== "SELLER_CAMPAIGN" && !ativaAbaixoDoTolerable;
+    ativaEntryPreliminar !== null && ativaEntryPreliminar.promo.promotion_type !== "SELLER_CAMPAIGN" && !ativaAbaixoDoTolerable;
   const poolMelhor = bloquearSellerCampaignComoTroca
     ? viaveis.filter((e) => e.promo.promotion_type !== "SELLER_CAMPAIGN")
     : viaveis;
@@ -469,6 +472,19 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
     : poolMelhor.length > 0
       ? poolMelhor.reduce((best, cur) => (cur.score > best.score ? cur : best))
       : null;
+
+  // Resolução definitiva de qual campanha "ativa" comparar com `melhor`:
+  // se a própria `melhor` já estiver entre as ativas (ex.: já foi aplicada
+  // numa rodada anterior, mesmo com outra campanha ainda ativa de propósito
+  // como backup — troca com diminuição de preço), usa ELA, não a primeira
+  // que a API listar. Sem isso, o motor nunca reconhecia a troca como já
+  // feita e ficava reenviando o mesmo join pra sempre — visto em produção
+  // chegando a "OFFER_ALREADY_EXISTS" depois de vários reenvios aceitos
+  // como atualização.
+  const ativaEntry =
+    (melhor &&
+      entradasAtivas.find((e) => e.promo.promotion_id === melhor.promo.promotion_id)) ||
+    ativaEntryPreliminar;
 
   // Sem NENHUMA campanha dentro do piso estrito: procura a melhor opção
   // que caia dentro da TOLERÂNCIA configurada (todas as variações do item
