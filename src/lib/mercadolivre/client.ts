@@ -144,6 +144,17 @@ export class MercadoLivreClient {
           continue;
         }
 
+        // Erro de servidor do ML (ex.: "Oops! Something went wrong...",
+        // visto em produção ~45x numa semana) — tenta de nova algumas vezes
+        // antes de desistir. Decisão consciente: não reconsulta o estado ao
+        // vivo antes de reenviar um join/leave, então existe risco (aceito)
+        // de reenvio duplicado se o pedido original já tiver sido
+        // processado do lado do ML apesar da resposta de erro.
+        if (resp.status >= 500 && attempt < 2) {
+          await new Promise((r) => setTimeout(r, (attempt + 1) * 1000));
+          continue;
+        }
+
         let data: T;
         try {
           data = (await resp.json()) as T;
