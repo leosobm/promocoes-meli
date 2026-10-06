@@ -71,6 +71,7 @@ interface DecisionInsertRow {
   desconto_consumidor_pct?: number | null;
   ml_participacao_pct?: number | null;
   ml_participacao_fonte?: string | null;
+  seller_percentage?: number | null;
   reducao_tarifa?: boolean;
   reducao_tarifa_pct?: number | null;
   reducao_tarifa_valor?: number | null;
@@ -664,6 +665,7 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
       desconto_consumidor_pct: e.descontoPct * 100,
       ml_participacao_pct: e.mlPct != null ? e.mlPct * 100 : null,
       ml_participacao_fonte: e.mlFonte,
+      seller_percentage: e.promo.seller_percentage ?? null,
       reducao_tarifa: !!e.promo.boosted_offer || tarifaEstimada !== null,
       reducao_tarifa_pct: tarifaEstimada ? tarifaEstimada.pctFrac * 100 : null,
       reducao_tarifa_valor: tarifaEstimada?.valor ?? null,

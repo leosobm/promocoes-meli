@@ -22,7 +22,7 @@ export interface CampaignTypeConfig {
   writeSupported: boolean;
   priceMode: "seller_defined" | "fixed_by_ml" | "no_price";
   requiresOfferId: boolean; // no POST de adesão
-  extraJoinFields?: "stock"; // LIGHTNING exige "stock" reservado
+  extraJoinFields?: "stock" | "percentages"; // LIGHTNING exige "stock" reservado; BANK exige meli_percentage/seller_percentage (PIX_OPTIN_PERCENTAGE_NULL_ERROR sem isso, visto em produção)
   deleteRequiresOfferId: boolean;
   canDeleteAfterActive: boolean; // false = doc diz explicitamente que não dá pra remover depois de ativa
   sourceUrl: string;
@@ -65,6 +65,7 @@ export const CAMPAIGN_TYPES: Record<string, CampaignTypeConfig> = {
     writeSupported: true,
     priceMode: "fixed_by_ml",
     requiresOfferId: true,
+    extraJoinFields: "percentages",
     deleteRequiresOfferId: false,
     canDeleteAfterActive: true,
     sourceUrl: "confirmado na prática (mercadolivre_adesao_campanhas.py)",

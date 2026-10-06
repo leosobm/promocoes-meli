@@ -362,7 +362,10 @@ export class MercadoLivreClient {
     mlb: string,
     promotionId: string,
     promotionType: PromotionType,
-    opts: { dealPrice?: number; topDealPrice?: number; offerId?: string; stock?: number } = {},
+    opts: {
+      dealPrice?: number; topDealPrice?: number; offerId?: string; stock?: number;
+      meliPercentage?: number; sellerPercentage?: number;
+    } = {},
   ): Promise<JoinResult> {
     const cfg = getCampaignTypeConfig(promotionType);
     if (!cfg.writeSupported) {
@@ -380,6 +383,10 @@ export class MercadoLivreClient {
     }
     if (cfg.requiresOfferId) body.offer_id = opts.offerId;
     if (cfg.extraJoinFields === "stock") body.stock = opts.stock;
+    if (cfg.extraJoinFields === "percentages") {
+      body.meli_percentage = opts.meliPercentage;
+      body.seller_percentage = opts.sellerPercentage;
+    }
 
     const { status, data } = await this.request(
       "POST",

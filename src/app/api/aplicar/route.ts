@@ -134,6 +134,8 @@ export async function POST(request: NextRequest) {
       dealPrice: typeCfg.priceMode === "seller_defined" ? d.preco_proposto ?? undefined : undefined,
       offerId: d.offer_id ?? undefined,
       stock: typeCfg.extraJoinFields === "stock" ? d.stock_sugerido ?? undefined : undefined,
+      meliPercentage: typeCfg.extraJoinFields === "percentages" ? d.ml_participacao_pct ?? undefined : undefined,
+      sellerPercentage: typeCfg.extraJoinFields === "percentages" ? d.seller_percentage ?? undefined : undefined,
     });
 
     // 2xx não é garantia de que o preço pedido realmente "colou" — visto
