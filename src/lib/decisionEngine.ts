@@ -747,6 +747,55 @@ export async function* runUpdate(
     ]),
   );
 
+  // Estratégias ativas HOJE (nível mais alto da cascata — acima até da
+  // margem própria do item) — uma por item ou uma por curva, nunca as
+  // duas pro mesmo alvo no mesmo período (garantido na validação de
+  // sobreposição em /api/estrategias). Campos de margem null na
+  // estratégia caem pro próximo nível mesmo com ela ativa.
+  const hojeISO = new Date().toISOString().slice(0, 10);
+  const { data: estrategiasAtivas } = await supabase
+    .from("estrategias")
+    .select("id, tipo_escopo, margem_minima_pct, margem_alvo_pct, margem_tolerancia_pct")
+    .lte("data_inicio", hojeISO)
+    .gte("data_fim", hojeISO);
+  const estrategiaById = new Map((estrategiasAtivas ?? []).map((e) => [e.id, e]));
+  const idsEstrategiaItem = (estrategiasAtivas ?? []).filter((e) => e.tipo_escopo === "item").map((e) => e.id);
+  const idsEstrategiaCurva = (estrategiasAtivas ?? []).filter((e) => e.tipo_escopo === "curva").map((e) => e.id);
+
+  const estrategiaPorMlb = new Map<string, CurvaSettings>();
+  for (let from = 0; idsEstrategiaItem.length > 0; from += 1000) {
+    const { data: page } = await supabase
+      .from("estrategia_itens")
+      .select("estrategia_id, mlb")
+      .in("estrategia_id", idsEstrategiaItem)
+      .range(from, from + 999);
+    if (!page || page.length === 0) break;
+    for (const it of page) {
+      const e = estrategiaById.get(it.estrategia_id);
+      if (e) {
+        estrategiaPorMlb.set(it.mlb, {
+          margem_minima_pct: e.margem_minima_pct, margem_alvo_pct: e.margem_alvo_pct, margem_tolerancia_pct: e.margem_tolerancia_pct,
+        });
+      }
+    }
+    if (page.length < 1000) break;
+  }
+  const estrategiaPorCurva = new Map<string, CurvaSettings>();
+  if (idsEstrategiaCurva.length > 0) {
+    const { data: curvasAlvo } = await supabase
+      .from("estrategia_curvas")
+      .select("estrategia_id, curva")
+      .in("estrategia_id", idsEstrategiaCurva);
+    for (const c of curvasAlvo ?? []) {
+      const e = estrategiaById.get(c.estrategia_id);
+      if (e) {
+        estrategiaPorCurva.set(c.curva, {
+          margem_minima_pct: e.margem_minima_pct, margem_alvo_pct: e.margem_alvo_pct, margem_tolerancia_pct: e.margem_tolerancia_pct,
+        });
+      }
+    }
+  }
+
   // O Supabase/PostgREST limita cada resposta a 1000 linhas por padrão —
   // sem paginação explícita, um catálogo grande (visto na prática: 2891
   // itens) tem a maior parte silenciosamente ignorada, sem erro nenhum.
@@ -765,11 +814,13 @@ export async function* runUpdate(
       return;
     }
     if (!page || page.length === 0) break;
-    // Cascata de 3 níveis pra margem mínima/alvo e tolerância: valor do
-    // próprio item > valor da curva do item (se tiver curva, e ela tiver
-    // esse campo definido) > valor geral do sistema (app_settings). Margem
-    // alvo tem ainda um último fallback (a própria margem mínima já
-    // resolvida) se nem item, nem curva, nem o geral definirem uma.
+    // Cascata de 5 níveis pra margem mínima/alvo e tolerância: estratégia
+    // por item (ativa hoje) > estratégia por curva (ativa hoje) > valor do
+    // próprio item > valor da curva do item > valor geral do sistema
+    // (app_settings). Cada nível só preenche o que o anterior deixou em
+    // branco (inclusive a própria estratégia: campo null nela também cai
+    // pro próximo nível). Margem alvo tem ainda um último fallback (a
+    // própria margem mínima já resolvida) se nenhum nível definir uma.
     const rawPage = page as {
       mlb: string; sku: string; cmv: number;
       margem_minima_pct: number | null; margem_alvo_pct: number | null; curva: string | null;
@@ -777,14 +828,22 @@ export async function* runUpdate(
     allRows.push(
       ...rawPage.map((r) => {
         const curvaCfg = r.curva ? curvaByLetra.get(r.curva) : undefined;
-        const margemMinimaEfetiva = r.margem_minima_pct ?? curvaCfg?.margem_minima_pct ?? settings.margem_minima_pct;
+        const estrategiaItem = estrategiaPorMlb.get(r.mlb);
+        const estrategiaCurva = r.curva ? estrategiaPorCurva.get(r.curva) : undefined;
+        const margemMinimaEfetiva =
+          estrategiaItem?.margem_minima_pct ?? estrategiaCurva?.margem_minima_pct ??
+          r.margem_minima_pct ?? curvaCfg?.margem_minima_pct ?? settings.margem_minima_pct;
         return {
           mlb: r.mlb,
           sku: r.sku,
           cmv: r.cmv,
           margem_minima_pct: margemMinimaEfetiva,
-          margem_alvo_pct: r.margem_alvo_pct ?? curvaCfg?.margem_alvo_pct ?? settings.margem_alvo_pct ?? null,
-          toleranciaFrac: (curvaCfg?.margem_tolerancia_pct ?? settings.margem_tolerancia_pct) / 100,
+          margem_alvo_pct:
+            estrategiaItem?.margem_alvo_pct ?? estrategiaCurva?.margem_alvo_pct ??
+            r.margem_alvo_pct ?? curvaCfg?.margem_alvo_pct ?? settings.margem_alvo_pct ?? null,
+          toleranciaFrac:
+            (estrategiaItem?.margem_tolerancia_pct ?? estrategiaCurva?.margem_tolerancia_pct ??
+              curvaCfg?.margem_tolerancia_pct ?? settings.margem_tolerancia_pct) / 100,
         };
       }),
     );
