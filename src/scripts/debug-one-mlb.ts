@@ -29,9 +29,14 @@ async function main() {
     process.exit(1);
   }
   const settingsRow = settingsRowRaw;
+  const { data: curvaRows } = await supabase
+    .from("curva_settings")
+    .select("curva, margem_minima_pct, margem_alvo_pct, margem_tolerancia_pct");
+  const curvaByLetra = new Map((curvaRows ?? []).map((c) => [c.curva, c]));
+
   const { data: rawRows } = await supabase
     .from("item_config")
-    .select("mlb, sku, cmv, margem_minima_pct, margem_alvo_pct")
+    .select("mlb, sku, cmv, margem_minima_pct, margem_alvo_pct, curva")
     .eq("mlb", mlb);
 
   if (!rawRows || rawRows.length === 0) {
@@ -39,14 +44,16 @@ async function main() {
     process.exit(1);
   }
 
-  // Mesma resolução de fallback que runUpdate() aplica: item sem margem
-  // própria usa a geral do sistema (ver 20260924000000_margem_geral.sql).
+  // Mesma cascata de 3 níveis que runUpdate() aplica: item > curva > geral
+  // do sistema (ver 20261008000000_curva_item.sql).
   const rows = rawRows.map((r) => {
-    const margemMinimaEfetiva = r.margem_minima_pct ?? settingsRow.margem_minima_pct;
+    const curvaCfg = r.curva ? curvaByLetra.get(r.curva) : undefined;
+    const margemMinimaEfetiva = r.margem_minima_pct ?? curvaCfg?.margem_minima_pct ?? settingsRow.margem_minima_pct;
     return {
       ...r,
       margem_minima_pct: margemMinimaEfetiva,
-      margem_alvo_pct: r.margem_alvo_pct ?? settingsRow.margem_alvo_pct ?? null,
+      margem_alvo_pct: r.margem_alvo_pct ?? curvaCfg?.margem_alvo_pct ?? settingsRow.margem_alvo_pct ?? null,
+      toleranciaFrac: (curvaCfg?.margem_tolerancia_pct ?? settingsRow.margem_tolerancia_pct) / 100,
     };
   });
 
@@ -60,7 +67,6 @@ async function main() {
     client,
     userId,
     taxasPct: settingsRow.taxas_pct / 100,
-    toleranciaFrac: settingsRow.margem_tolerancia_pct / 100,
     weights: {
       pesoDesconto: settingsRow.peso_desconto_pct / 100,
       pesoMl: settingsRow.peso_ml_pct / 100,

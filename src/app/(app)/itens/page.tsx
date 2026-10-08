@@ -10,7 +10,7 @@ export default async function ItensPage() {
   const supabase = await createServerSupabase();
   const { data: items } = await supabase
     .from("item_config")
-    .select("mlb, sku, cmv, margem_minima_pct, margem_alvo_pct, participar_campanhas, updated_at")
+    .select("mlb, sku, cmv, margem_minima_pct, margem_alvo_pct, curva, participar_campanhas, updated_at")
     .order("updated_at", { ascending: false })
     .limit(500);
 
@@ -20,9 +20,10 @@ export default async function ItensPage() {
         <h1 className="text-xl font-semibold text-neutral-900">Itens (custo e margem)</h1>
         <p className="mt-1 text-sm text-neutral-500">
           Envie um .csv ou .xlsx com colunas mlb, sku, cmv, margem_minima_pct (opcional),
-          margem_alvo_pct (opcional), participar_campanhas (opcional). Item sem margem própria usa
-          a margem geral do sistema, definida em Configurações. Upload é incremental — atualiza só
-          quem está no arquivo, não apaga o resto.
+          margem_alvo_pct (opcional), curva (opcional: A, B, C ou D), participar_campanhas
+          (opcional). Item sem margem própria usa a margem da sua curva (se tiver) ou a margem
+          geral do sistema, definidas em Configurações. Upload é incremental — atualiza só quem
+          está no arquivo, não apaga o resto.
         </p>
         <p className="mt-1 text-sm text-neutral-500">
           Item com variação (várias cores/tamanhos sob o mesmo MLB): repita o MLB numa linha por
@@ -49,6 +50,7 @@ export default async function ItensPage() {
               <th className="p-3 text-right">CMV</th>
               <th className="p-3 text-right">Margem mínima</th>
               <th className="p-3 text-right">Margem alvo</th>
+              <th className="p-3">Curva</th>
               <th className="p-3">Participa?</th>
               <th className="p-3">Atualizado</th>
             </tr>
@@ -65,6 +67,7 @@ export default async function ItensPage() {
                 <td className="p-3 text-right">
                   {i.margem_alvo_pct != null ? `${i.margem_alvo_pct}%` : <span className="text-neutral-400">Geral do sistema</span>}
                 </td>
+                <td className="p-3">{i.curva ?? <span className="text-neutral-400">-</span>}</td>
                 <td className="p-3">{i.participar_campanhas ? "Sim" : "Não"}</td>
                 <td className="p-3 text-xs text-neutral-500">
                   {new Date(i.updated_at).toLocaleString("pt-BR")}
@@ -73,7 +76,7 @@ export default async function ItensPage() {
             ))}
             {(items ?? []).length === 0 && (
               <tr>
-                <td colSpan={7} className="p-6 text-center text-neutral-500">
+                <td colSpan={8} className="p-6 text-center text-neutral-500">
                   Nenhum item cadastrado ainda.
                 </td>
               </tr>

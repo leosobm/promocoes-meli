@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth/roles";
 import ConfigForm from "@/components/ConfigForm";
+import CurvaSettingsForm from "@/components/CurvaSettingsForm";
 import UserManagement from "@/components/UserManagement";
 
 export default async function ConfigPage() {
@@ -18,6 +19,10 @@ export default async function ConfigPage() {
     .from("app_users")
     .select("id, email, role, created_at")
     .order("created_at", { ascending: true });
+  const { data: curvas } = await supabase
+    .from("curva_settings")
+    .select("curva, margem_minima_pct, margem_alvo_pct, margem_tolerancia_pct")
+    .order("curva", { ascending: true });
 
   return (
     <div className="max-w-3xl space-y-10">
@@ -34,6 +39,27 @@ export default async function ConfigPage() {
               taxas_pct: 0, peso_desconto_pct: 40, peso_ml_pct: 35, peso_margem_pct: 25, margem_tolerancia_pct: 0,
               margem_minima_pct: 12, margem_alvo_pct: null,
             }
+          }
+        />
+      </div>
+
+      <div className="max-w-lg space-y-4">
+        <div>
+          <h2 className="text-lg font-semibold text-neutral-900">Margem por curva (A/B/C/D)</h2>
+          <p className="mt-1 text-sm text-neutral-500">
+            Estratégia de margem própria por curva — usada quando o item tem uma curva (em Itens) e
+            NÃO tem margem própria definida. Campo vazio aqui cai pra margem/tolerância geral do
+            sistema, acima. Ordem de prioridade: margem do item &gt; margem da curva do item &gt;
+            margem geral.
+          </p>
+        </div>
+        <CurvaSettingsForm
+          initial={
+            curvas && curvas.length === 4
+              ? curvas
+              : (["A", "B", "C", "D"] as const).map((curva) => ({
+                  curva, margem_minima_pct: null, margem_alvo_pct: null, margem_tolerancia_pct: null,
+                }))
           }
         />
       </div>

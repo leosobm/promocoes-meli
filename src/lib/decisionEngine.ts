@@ -46,12 +46,22 @@ interface AppSettings {
   margem_alvo_pct: number | null;
 }
 
+interface CurvaSettings {
+  margem_minima_pct: number | null;
+  margem_alvo_pct: number | null;
+  margem_tolerancia_pct: number | null;
+}
+
 export interface ItemConfigRow {
   mlb: string;
   sku: string; // '' = item sem variação (ou variação não informada)
   cmv: number;
-  margem_minima_pct: number; // já resolvida: do item, ou a geral do sistema se o item não tiver a sua
-  margem_alvo_pct: number | null; // já resolvida: do item, ou a geral, ou null (cai na margem mínima)
+  // Os três campos abaixo já vêm resolvidos pela cascata: valor do item >
+  // valor da curva (se o item tiver curva e ela tiver o campo definido) >
+  // valor geral do sistema (app_settings). Ver resolução em runUpdate().
+  margem_minima_pct: number;
+  margem_alvo_pct: number | null;
+  toleranciaFrac: number; // fração (0.10 = 10%), já resolvida pela mesma cascata
 }
 
 interface VariacaoResultado {
@@ -106,7 +116,6 @@ export interface RunContext {
   client: MercadoLivreClient;
   userId: number;
   taxasPct: number;
-  toleranciaFrac: number; // 0.10 = 10% de tolerância sobre o piso de cada item
   weights: ScoreWeights;
   runId: string;
 }
@@ -469,8 +478,12 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
   // uma troca só por pontuar mais enquanto a ativa ainda está numa margem
   // aceitável. Não afeta nova adesão (sem campanha ativa) nem quando a
   // própria ativa já é SELLER_CAMPAIGN.
+  // Tolerância resolvida por curva/geral já vem em cada `row` (ver
+  // runUpdate()) — um item normalmente tem a mesma curva em todas as
+  // variações, mas o cálculo abaixo respeita por linha mesmo assim.
+  const toleranciaFracItem = rows[0]?.toleranciaFrac ?? 0;
   const margemAtivaAoVivo = ativaEntryPreliminar ? ativaEntryPreliminar.margemAoVivoPct ?? ativaEntryPreliminar.margemPct * 100 : null;
-  const pisoToleradoMaisExigente = Math.max(...rows.map((row) => row.margem_minima_pct * (1 - ctx.toleranciaFrac)));
+  const pisoToleradoMaisExigente = Math.max(...rows.map((row) => row.margem_minima_pct * (1 - row.toleranciaFrac)));
   const ativaAbaixoDoTolerable = margemAtivaAoVivo != null && margemAtivaAoVivo < pisoToleradoMaisExigente;
   const bloquearSellerCampaignComoTroca =
     ativaEntryPreliminar !== null && ativaEntryPreliminar.promo.promotion_type !== "SELLER_CAMPAIGN" && !ativaAbaixoDoTolerable;
@@ -508,14 +521,14 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
   // "oportunidade abaixo do piso" pra opt-in manual, nunca escolhida
   // automaticamente. Ignora candidatas com erro de cálculo (sem variacoes).
   let melhorTolerancia: (typeof evaluated)[number] | null = null;
-  if (melhor === null && ctx.toleranciaFrac > 0) {
+  if (melhor === null && toleranciaFracItem > 0) {
     const candidatosTolerancia = evaluated.filter((e) => {
       if (e.rejeitada === null || !e.variacoes) return false;
       if (ACTIVE_STATUSES.has((e.promo.status ?? "").toLowerCase())) return false; // já ativa — nada pra "opt-in"
       return rows.every((row) => {
         const v = e.variacoes!.find((vv) => vv.sku === (row.sku || null));
         if (!v || v.margem_calculada_pct == null) return false;
-        const pisoTolerado = row.margem_minima_pct * (1 - ctx.toleranciaFrac);
+        const pisoTolerado = row.margem_minima_pct * (1 - row.toleranciaFrac);
         return v.margem_calculada_pct >= pisoTolerado;
       });
     });
@@ -585,7 +598,7 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
     let motivo: string;
     if (ehTolerancia) {
       motivo =
-        `Abaixo do piso de margem, mas DENTRO DA TOLERÂNCIA configurada (${(ctx.toleranciaFrac * 100).toFixed(0)}%): ` +
+        `Abaixo do piso de margem, mas DENTRO DA TOLERÂNCIA configurada (${(toleranciaFracItem * 100).toFixed(0)}%): ` +
         `margem resultante ${(e.margemPct * 100).toFixed(1)}%${refTxt}. Não foi escolhida automaticamente — requer sua aprovação manual explícita.`;
     } else if (e.rejeitada) {
       motivo = `Rejeitada: ${e.rejeitada}`;
@@ -723,7 +736,16 @@ export async function* runUpdate(
     pesoMargem: settings.peso_margem_pct / 100,
   };
   const taxasPct = settings.taxas_pct / 100;
-  const toleranciaFrac = settings.margem_tolerancia_pct / 100;
+
+  const { data: curvaRows } = await supabase
+    .from("curva_settings")
+    .select("curva, margem_minima_pct, margem_alvo_pct, margem_tolerancia_pct");
+  const curvaByLetra = new Map<string, CurvaSettings>(
+    (curvaRows ?? []).map((c) => [
+      c.curva as string,
+      { margem_minima_pct: c.margem_minima_pct, margem_alvo_pct: c.margem_alvo_pct, margem_tolerancia_pct: c.margem_tolerancia_pct },
+    ]),
+  );
 
   // O Supabase/PostgREST limita cada resposta a 1000 linhas por padrão —
   // sem paginação explícita, um catálogo grande (visto na prática: 2891
@@ -733,7 +755,7 @@ export async function* runUpdate(
   for (let from = 0; ; from += 1000) {
     const { data: page, error: icErr } = await supabase
       .from("item_config")
-      .select("mlb, sku, cmv, margem_minima_pct, margem_alvo_pct")
+      .select("mlb, sku, cmv, margem_minima_pct, margem_alvo_pct, curva")
       .eq("participar_campanhas", true)
       .order("mlb", { ascending: true })
       .order("sku", { ascending: true })
@@ -743,22 +765,26 @@ export async function* runUpdate(
       return;
     }
     if (!page || page.length === 0) break;
-    // Item sem margem própria cadastrada usa a geral do sistema
-    // (app_settings) — a margem alvo tem um segundo fallback (a própria
-    // margem mínima já resolvida) se nem o item nem o sistema definirem uma.
+    // Cascata de 3 níveis pra margem mínima/alvo e tolerância: valor do
+    // próprio item > valor da curva do item (se tiver curva, e ela tiver
+    // esse campo definido) > valor geral do sistema (app_settings). Margem
+    // alvo tem ainda um último fallback (a própria margem mínima já
+    // resolvida) se nem item, nem curva, nem o geral definirem uma.
     const rawPage = page as {
       mlb: string; sku: string; cmv: number;
-      margem_minima_pct: number | null; margem_alvo_pct: number | null;
+      margem_minima_pct: number | null; margem_alvo_pct: number | null; curva: string | null;
     }[];
     allRows.push(
       ...rawPage.map((r) => {
-        const margemMinimaEfetiva = r.margem_minima_pct ?? settings.margem_minima_pct;
+        const curvaCfg = r.curva ? curvaByLetra.get(r.curva) : undefined;
+        const margemMinimaEfetiva = r.margem_minima_pct ?? curvaCfg?.margem_minima_pct ?? settings.margem_minima_pct;
         return {
           mlb: r.mlb,
           sku: r.sku,
           cmv: r.cmv,
           margem_minima_pct: margemMinimaEfetiva,
-          margem_alvo_pct: r.margem_alvo_pct ?? settings.margem_alvo_pct ?? null,
+          margem_alvo_pct: r.margem_alvo_pct ?? curvaCfg?.margem_alvo_pct ?? settings.margem_alvo_pct ?? null,
+          toleranciaFrac: (curvaCfg?.margem_tolerancia_pct ?? settings.margem_tolerancia_pct) / 100,
         };
       }),
     );
@@ -838,7 +864,7 @@ export async function* runUpdate(
   }
   const client = await MercadoLivreClient.fromStore();
   const userId = await client.getUserId();
-  const ctx: RunContext = { client, userId, taxasPct, toleranciaFrac, weights, runId };
+  const ctx: RunContext = { client, userId, taxasPct, weights, runId };
 
   let doneCount = jaProcessados.size;
 

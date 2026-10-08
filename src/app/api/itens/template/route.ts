@@ -12,6 +12,7 @@ export async function GET() {
       cmv: 45.9,
       margem_minima_pct: 12,
       margem_alvo_pct: 20,
+      curva: "",
       participar_campanhas: "SIM",
     },
     {
@@ -24,6 +25,7 @@ export async function GET() {
       cmv: 49.9,
       margem_minima_pct: 12,
       margem_alvo_pct: 20,
+      curva: "",
       participar_campanhas: "SIM",
     },
     {
@@ -32,24 +34,37 @@ export async function GET() {
       cmv: 120,
       margem_minima_pct: 15,
       margem_alvo_pct: "",
+      curva: "",
       participar_campanhas: "SIM",
     },
     {
-      // Sem margem própria — usa a margem mínima/alvo geral do sistema,
-      // definida em Configurações.
+      // Sem margem própria, mas com curva A — usa a margem mínima/alvo/
+      // tolerância da curva A, definida em Configurações.
+      mlb: "MLB4444444444",
+      sku: "",
+      cmv: 18,
+      margem_minima_pct: "",
+      margem_alvo_pct: "",
+      curva: "A",
+      participar_campanhas: "SIM",
+    },
+    {
+      // Sem margem própria e sem curva — usa a margem mínima/alvo/
+      // tolerância geral do sistema, definida em Configurações.
       mlb: "MLB5555555555",
       sku: "",
       cmv: 30,
       margem_minima_pct: "",
       margem_alvo_pct: "",
+      curva: "",
       participar_campanhas: "SIM",
     },
   ];
   const wsModelo = XLSX.utils.json_to_sheet(modeloRows, {
-    header: ["mlb", "sku", "cmv", "margem_minima_pct", "margem_alvo_pct", "participar_campanhas"],
+    header: ["mlb", "sku", "cmv", "margem_minima_pct", "margem_alvo_pct", "curva", "participar_campanhas"],
   });
   wsModelo["!cols"] = [
-    { wch: 18 }, { wch: 20 }, { wch: 10 }, { wch: 18 }, { wch: 16 }, { wch: 20 },
+    { wch: 18 }, { wch: 20 }, { wch: 10 }, { wch: 18 }, { wch: 16 }, { wch: 8 }, { wch: 20 },
   ];
   XLSX.utils.book_append_sheet(wb, wsModelo, "Modelo");
 
@@ -87,6 +102,13 @@ export async function GET() {
       Descrição:
         "Margem 'ideal', em %. Usada para CALCULAR o preço em campanhas onde você define o preço (DEAL, SELLER_CAMPAIGN, LIGHTNING, DOD). Se vazio, usa a margem alvo GERAL de Configurações; se essa também estiver vazia, usa a margem mínima (do item ou geral) como alvo.",
       "Formato / Exemplo": "20",
+    },
+    {
+      Coluna: "curva",
+      "Obrigatório?": "Não",
+      Descrição:
+        "Classificação ABC(D) do item: A, B, C ou D. Se a curva tiver margem mínima/alvo/tolerância própria definida em Configurações, ela é usada antes da geral do sistema (mas só quando o PRÓPRIO item não tiver margem definida nas colunas acima). Vazio = sem curva, usa direto a margem geral.",
+      "Formato / Exemplo": "A",
     },
     {
       Coluna: "participar_campanhas",
