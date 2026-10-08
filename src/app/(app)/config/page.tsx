@@ -55,9 +55,9 @@ export default async function ConfigPage() {
         </div>
         <CurvaSettingsForm
           initial={
-            curvas && curvas.length === 4
+            curvas && curvas.length === 5
               ? curvas
-              : (["A", "B", "C", "D"] as const).map((curva) => ({
+              : (["A", "B", "C", "D", "Lançamento"] as const).map((curva) => ({
                   curva, margem_minima_pct: null, margem_alvo_pct: null, margem_tolerancia_pct: null,
                 }))
           }

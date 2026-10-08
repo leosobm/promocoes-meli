@@ -20,7 +20,7 @@ export default async function ItensPage() {
         <h1 className="text-xl font-semibold text-neutral-900">Itens (custo e margem)</h1>
         <p className="mt-1 text-sm text-neutral-500">
           Envie um .csv ou .xlsx com colunas mlb, sku, cmv, margem_minima_pct (opcional),
-          margem_alvo_pct (opcional), curva (opcional: A, B, C ou D), participar_campanhas
+          margem_alvo_pct (opcional), curva (opcional: A, B, C, D ou Lançamento), participar_campanhas
           (opcional). Item sem margem própria usa a margem da sua curva (se tiver) ou a margem
           geral do sistema, definidas em Configurações. Upload é incremental — atualiza só quem
           está no arquivo, não apaga o resto.

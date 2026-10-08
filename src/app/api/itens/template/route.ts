@@ -49,6 +49,17 @@ export async function GET() {
       participar_campanhas: "SIM",
     },
     {
+      // Item novo, sem histórico de vendas pra classificar numa curva ABC
+      // ainda — curva "Lançamento", com sua própria estratégia de margem.
+      mlb: "MLB6666666666",
+      sku: "",
+      cmv: 22,
+      margem_minima_pct: "",
+      margem_alvo_pct: "",
+      curva: "Lançamento",
+      participar_campanhas: "SIM",
+    },
+    {
       // Sem margem própria e sem curva — usa a margem mínima/alvo/
       // tolerância geral do sistema, definida em Configurações.
       mlb: "MLB5555555555",
@@ -107,8 +118,8 @@ export async function GET() {
       Coluna: "curva",
       "Obrigatório?": "Não",
       Descrição:
-        "Classificação ABC(D) do item: A, B, C ou D. Se a curva tiver margem mínima/alvo/tolerância própria definida em Configurações, ela é usada antes da geral do sistema (mas só quando o PRÓPRIO item não tiver margem definida nas colunas acima). Vazio = sem curva, usa direto a margem geral.",
-      "Formato / Exemplo": "A",
+        "Classificação do item: A, B, C, D ou Lançamento (itens novos, sem histórico de vendas pra classificar numa curva ABC ainda). Se a curva tiver margem mínima/alvo/tolerância própria definida em Configurações, ela é usada antes da geral do sistema (mas só quando o PRÓPRIO item não tiver margem definida nas colunas acima). Vazio = sem curva, usa direto a margem geral.",
+      "Formato / Exemplo": "A, B, C, D ou Lançamento",
     },
     {
       Coluna: "participar_campanhas",

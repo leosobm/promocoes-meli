@@ -9,7 +9,7 @@ import { requireAdmin } from "@/lib/auth/requireAdmin";
  *   mlb, sku?, cmv, margem_minima_pct?, margem_alvo_pct?, curva?, participar_campanhas?
  * margem_minima_pct/margem_alvo_pct em branco usam a margem da curva do
  * item (se tiver) ou a margem geral do sistema (Configurações) — cascata
- * de 3 níveis em decisionEngine.ts. curva aceita A, B, C ou D.
+ * de 3 níveis em decisionEngine.ts. curva aceita A, B, C, D ou Lançamento.
  * Faz upsert em item_config pela chave composta (mlb, sku) — um MLB pode
  * aparecer em várias linhas, uma por SKU/variação (a API de Promoções do ML
  * grava o preço promocional a nível de MLB, não de variação, então o motor
@@ -17,6 +17,10 @@ import { requireAdmin } from "@/lib/auth/requireAdmin";
  * se uma campanha é segura pro anúncio inteiro — ver decisionEngine.ts).
  * Não apaga itens ausentes do arquivo — upload é incremental.
  */
+
+// Mantido em sincronia com o CHECK de item_config.curva/curva_settings.curva
+// no banco (ver migrações curva_item / curva_lancamento).
+const CURVAS_VALIDAS = ["A", "B", "C", "D", "Lançamento"] as const;
 
 const ROW_SCHEMA = z.object({
   mlb: z.string().trim().min(1, "MLB obrigatório"),
@@ -28,9 +32,22 @@ const ROW_SCHEMA = z.object({
   margem_alvo_pct: z.coerce.number().min(0).max(99).optional().nullable(),
   // Opcional: liga o item a uma estratégia de margem por curva
   // (Configurações) — entra na cascata entre o item e a margem geral.
-  curva: z.enum(["A", "B", "C", "D"]).optional().nullable(),
+  curva: z.enum(CURVAS_VALIDAS).optional().nullable(),
   participar_campanhas: z.boolean().default(true),
 });
+
+/** "lançamento", "LANÇAMENTO", " a " etc. → forma canônica da lista acima
+ * (comparação sem distinguir maiúsculas/acentuação de caixa) — sem isso,
+ * o .toUpperCase() usado antes pra normalizar "a"→"A" quebraria
+ * "Lançamento" (viraria "LANÇAMENTO", que não bate com o enum). Valor não
+ * reconhecido passa adiante em maiúsculas, pra cair no erro de validação
+ * do zod com uma mensagem clara em vez de normalizar silenciosamente
+ * errado. */
+function normalizeCurva(raw: string): string {
+  const trimmed = raw.trim();
+  const match = CURVAS_VALIDAS.find((c) => c.toLowerCase() === trimmed.toLowerCase());
+  return match ?? trimmed.toUpperCase();
+}
 
 const COLUMN_ALIASES: Record<string, string> = {
   "id canal": "mlb",
@@ -90,8 +107,7 @@ export async function POST(request: NextRequest) {
     if (mapped.margem_alvo_pct === "") mapped.margem_alvo_pct = undefined;
     if (mapped.margem_minima_pct === "") mapped.margem_minima_pct = undefined;
     if (typeof mapped.curva === "string") {
-      const curvaNormalizada = mapped.curva.trim().toUpperCase();
-      mapped.curva = curvaNormalizada === "" ? undefined : curvaNormalizada;
+      mapped.curva = mapped.curva.trim() === "" ? undefined : normalizeCurva(mapped.curva);
     }
 
     const parsed = ROW_SCHEMA.safeParse(mapped);
