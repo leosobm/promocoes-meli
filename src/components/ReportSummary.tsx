@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { RunReport } from "@/lib/reportData";
+import { formatDateTimeBrasilia } from "@/lib/timezone";
 
 function fmtPct(v: number | null) {
   return v == null ? "-" : `${v.toFixed(1)}%`;
@@ -76,7 +77,7 @@ function Section({
                   </td>
                   {showApplied ? (
                     <td className="p-2.5 text-xs text-neutral-500">
-                      {r.applied_at ? new Date(r.applied_at).toLocaleString("pt-BR") : "-"}
+                      {r.applied_at ? formatDateTimeBrasilia(r.applied_at) : "-"}
                     </td>
                   ) : (
                     <td className="max-w-[280px] p-2.5 text-xs text-neutral-600">{r.motivo}</td>
@@ -114,7 +115,7 @@ export default function ReportSummary({ report }: { report: RunReport }) {
             Relatório da última atualização
           </h2>
           <p className="text-xs text-neutral-500">
-            {report.createdAt && new Date(report.createdAt).toLocaleString("pt-BR")} —{" "}
+            {report.createdAt && formatDateTimeBrasilia(report.createdAt)} —{" "}
             {report.totalItens} item(ns) processado(s)
           </p>
         </div>

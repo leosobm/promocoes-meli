@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth/roles";
+import { hojeBrasilia } from "@/lib/timezone";
 import EstrategiasList from "@/components/EstrategiasList";
 
 export default async function EstrategiasPage() {
@@ -27,7 +28,7 @@ export default async function EstrategiasPage() {
   for (const i of itens ?? []) contagemPorId.set(i.estrategia_id, (contagemPorId.get(i.estrategia_id) ?? 0) + 1);
   for (const c of curvas ?? []) contagemPorId.set(c.estrategia_id, (contagemPorId.get(c.estrategia_id) ?? 0) + 1);
 
-  const hoje = new Date().toISOString().slice(0, 10);
+  const hoje = hojeBrasilia();
   const comStatus = (estrategias ?? []).map((e) => ({
     ...e,
     total_alvos: contagemPorId.get(e.id) ?? 0,

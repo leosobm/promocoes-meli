@@ -11,6 +11,7 @@ import {
   type ScoreWeights,
 } from "@/lib/scoring";
 import type { ItemDetail, ItemPromotion } from "@/lib/mercadolivre/types";
+import { hojeBrasilia } from "@/lib/timezone";
 
 export type ProgressEvent =
   | { type: "log"; message: string }
@@ -752,7 +753,7 @@ export async function* runUpdate(
   // duas pro mesmo alvo no mesmo período (garantido na validação de
   // sobreposição em /api/estrategias). Campos de margem null na
   // estratégia caem pro próximo nível mesmo com ela ativa.
-  const hojeISO = new Date().toISOString().slice(0, 10);
+  const hojeISO = hojeBrasilia();
   const { data: estrategiasAtivas } = await supabase
     .from("estrategias")
     .select("id, tipo_escopo, margem_minima_pct, margem_alvo_pct, margem_tolerancia_pct")

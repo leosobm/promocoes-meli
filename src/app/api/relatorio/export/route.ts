@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import * as XLSX from "xlsx";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { getLatestRunReport, type DecisionReportRow } from "@/lib/reportData";
+import { formatDateTimeBrasilia, stampBrasilia } from "@/lib/timezone";
 
 function toSheetRows(rows: DecisionReportRow[]) {
   return rows.map((r) => ({
@@ -24,8 +25,8 @@ function toSheetRows(rows: DecisionReportRow[]) {
     Score: r.score ?? "",
     Status: r.status,
     Motivo: r.motivo,
-    "Calculado em": r.created_at,
-    "Aplicado em": r.applied_at ?? "",
+    "Calculado em": formatDateTimeBrasilia(r.created_at),
+    "Aplicado em": r.applied_at ? formatDateTimeBrasilia(r.applied_at) : "",
   }));
 }
 
@@ -51,7 +52,7 @@ export async function GET(request: NextRequest) {
   const wb = XLSX.utils.book_new();
   const resumoWs = XLSX.utils.json_to_sheet([
     { Métrica: "Rodada (run_id)", Valor: report.runId ?? "-" },
-    { Métrica: "Data/hora", Valor: report.createdAt ? new Date(report.createdAt).toLocaleString("pt-BR") : "-" },
+    { Métrica: "Data/hora", Valor: report.createdAt ? formatDateTimeBrasilia(report.createdAt) : "-" },
     { Métrica: "Itens processados", Valor: report.totalItens },
     { Métrica: "Aderido", Valor: report.aderido.length },
     { Métrica: "Para revisão", Valor: report.paraRevisao.length },
@@ -65,7 +66,7 @@ export async function GET(request: NextRequest) {
   addSheet(wb, "Não aderido", report.naoAderido);
 
   const buffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer;
-  const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-");
+  const stamp = stampBrasilia();
 
   return new Response(new Uint8Array(buffer), {
     headers: {

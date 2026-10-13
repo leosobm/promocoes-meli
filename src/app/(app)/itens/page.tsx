@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth/roles";
+import { formatDateTimeBrasilia } from "@/lib/timezone";
 import UploadItemsForm from "@/components/UploadItemsForm";
 
 export default async function ItensPage() {
@@ -70,7 +71,7 @@ export default async function ItensPage() {
                 <td className="p-3">{i.curva ?? <span className="text-neutral-400">-</span>}</td>
                 <td className="p-3">{i.participar_campanhas ? "Sim" : "Não"}</td>
                 <td className="p-3 text-xs text-neutral-500">
-                  {new Date(i.updated_at).toLocaleString("pt-BR")}
+                  {formatDateTimeBrasilia(i.updated_at)}
                 </td>
               </tr>
             ))}

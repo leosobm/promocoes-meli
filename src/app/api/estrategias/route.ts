@@ -3,6 +3,7 @@ import { z } from "zod";
 import { createServiceSupabase } from "@/lib/supabase/server";
 import { requireAdmin } from "@/lib/auth/requireAdmin";
 import { validarSobreposicao } from "@/lib/estrategias/validarSobreposicao";
+import { hojeBrasilia } from "@/lib/timezone";
 
 const BODY_SCHEMA = z.object({
   nome: z.string().trim().min(1, "Nome obrigatório"),
@@ -38,7 +39,7 @@ export async function GET() {
   for (const i of itens ?? []) contagemPorId.set(i.estrategia_id, (contagemPorId.get(i.estrategia_id) ?? 0) + 1);
   for (const c of curvas ?? []) contagemPorId.set(c.estrategia_id, (contagemPorId.get(c.estrategia_id) ?? 0) + 1);
 
-  const hoje = new Date().toISOString().slice(0, 10);
+  const hoje = hojeBrasilia();
   const resultado = (estrategias ?? []).map((e) => ({
     ...e,
     total_alvos: contagemPorId.get(e.id) ?? 0,

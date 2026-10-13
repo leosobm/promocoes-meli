@@ -1,4 +1,5 @@
 import { createServerSupabase } from "@/lib/supabase/server";
+import { formatDateTimeBrasilia } from "@/lib/timezone";
 
 const STATUS_LABEL: Record<string, string> = {
   aplicada: "Aplicada",
@@ -49,7 +50,7 @@ export default async function HistoricoPage() {
             {(decisions ?? []).map((d) => (
               <tr key={d.id} className="border-t border-neutral-100 align-top">
                 <td className="whitespace-nowrap p-3 text-xs text-neutral-500">
-                  {new Date(d.applied_at ?? d.created_at).toLocaleString("pt-BR")}
+                  {formatDateTimeBrasilia(d.applied_at ?? d.created_at)}
                 </td>
                 <td className="p-3 font-medium">{d.mlb}</td>
                 <td className="p-3">
