@@ -4,16 +4,41 @@ import { getCurrentUser } from "@/lib/auth/roles";
 import { formatDateTimeBrasilia } from "@/lib/timezone";
 import UploadItemsForm from "@/components/UploadItemsForm";
 
-export default async function ItensPage() {
+const CURVAS = ["A", "B", "C", "D", "Lançamento"] as const;
+const LIMITE = 500;
+
+export default async function ItensPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ mlb?: string; sku?: string; curva?: string }>;
+}) {
   const current = await getCurrentUser();
   if (current?.role !== "admin") redirect("/");
 
+  const { mlb, sku, curva } = await searchParams;
+  const temFiltro = !!(mlb?.trim() || sku?.trim() || curva?.trim());
+
   const supabase = await createServerSupabase();
-  const { data: items } = await supabase
+
+  let itemsQuery = supabase
     .from("item_config")
-    .select("mlb, sku, cmv, margem_minima_pct, margem_alvo_pct, curva, participar_campanhas, updated_at")
-    .order("updated_at", { ascending: false })
-    .limit(500);
+    .select("mlb, sku, cmv, margem_minima_pct, margem_alvo_pct, curva, participar_campanhas, updated_at");
+  let countQuery = supabase.from("item_config").select("*", { count: "exact", head: true });
+  if (mlb?.trim()) {
+    itemsQuery = itemsQuery.ilike("mlb", `%${mlb.trim()}%`);
+    countQuery = countQuery.ilike("mlb", `%${mlb.trim()}%`);
+  }
+  if (sku?.trim()) {
+    itemsQuery = itemsQuery.ilike("sku", `%${sku.trim()}%`);
+    countQuery = countQuery.ilike("sku", `%${sku.trim()}%`);
+  }
+  if (curva?.trim()) {
+    itemsQuery = itemsQuery.eq("curva", curva.trim());
+    countQuery = countQuery.eq("curva", curva.trim());
+  }
+
+  const { data: items } = await itemsQuery.order("updated_at", { ascending: false }).limit(LIMITE);
+  const { count: totalCorrespondente } = await countQuery;
 
   return (
     <div className="space-y-6">
@@ -41,6 +66,61 @@ export default async function ItensPage() {
       </div>
 
       <UploadItemsForm />
+
+      <form method="get" className="flex flex-wrap items-end gap-3 rounded-lg border border-neutral-200 bg-white p-4">
+        <div>
+          <label className="block text-xs font-medium text-neutral-600">MLB</label>
+          <input
+            type="text"
+            name="mlb"
+            defaultValue={mlb ?? ""}
+            placeholder="ex: MLB3462431518"
+            className="mt-1 w-48 rounded-md border border-neutral-300 px-3 py-1.5 text-sm"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-neutral-600">SKU</label>
+          <input
+            type="text"
+            name="sku"
+            defaultValue={sku ?? ""}
+            placeholder="ex: 64.02"
+            className="mt-1 w-40 rounded-md border border-neutral-300 px-3 py-1.5 text-sm"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-neutral-600">Curva</label>
+          <select
+            name="curva"
+            defaultValue={curva ?? ""}
+            className="mt-1 w-40 rounded-md border border-neutral-300 px-3 py-1.5 text-sm"
+          >
+            <option value="">Todas</option>
+            {CURVAS.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        </div>
+        <button
+          type="submit"
+          className="rounded-md bg-neutral-900 px-4 py-1.5 text-sm font-medium text-white hover:bg-neutral-800"
+        >
+          Filtrar
+        </button>
+        {temFiltro && (
+          <a href="/itens" className="text-sm font-medium text-neutral-600 hover:underline">
+            Limpar filtros
+          </a>
+        )}
+      </form>
+
+      <p className="text-sm text-neutral-500">
+        {(totalCorrespondente ?? 0)} item(ns) {temFiltro ? "encontrado(s) com esse filtro" : "cadastrado(s)"}
+        {(totalCorrespondente ?? 0) > LIMITE &&
+          ` — mostrando os ${LIMITE} mais recentes; refine a busca por MLB, SKU ou curva pra encontrar um item específico fora dessa lista.`}
+      </p>
 
       <div className="overflow-x-auto rounded-lg border border-neutral-200 bg-white">
         <table className="w-full text-sm">
