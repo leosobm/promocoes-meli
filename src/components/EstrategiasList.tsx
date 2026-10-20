@@ -12,6 +12,7 @@ interface Estrategia {
   tipo_escopo: "item" | "curva";
   margem_minima_pct: number | null;
   margem_alvo_pct: number | null;
+  margem_teto_pct: number | null;
   margem_tolerancia_pct: number | null;
   total_alvos: number;
   status: "agendada" | "ativa" | "encerrada";
@@ -69,7 +70,7 @@ export default function EstrategiasList({ estrategias }: { estrategias: Estrateg
             <th className="p-3">Status</th>
             <th className="p-3">Período</th>
             <th className="p-3">Escopo</th>
-            <th className="p-3 text-right">Mín. / Alvo / Toler.</th>
+            <th className="p-3 text-right">Mín. / Alvo / Teto / Toler.</th>
             <th className="p-3"></th>
           </tr>
         </thead>
@@ -89,7 +90,7 @@ export default function EstrategiasList({ estrategias }: { estrategias: Estrateg
                 {e.tipo_escopo === "item" ? "Por item" : "Por curva"} ({e.total_alvos})
               </td>
               <td className="p-3 text-right text-xs text-neutral-600">
-                {fmtPct(e.margem_minima_pct)} / {fmtPct(e.margem_alvo_pct)} / {fmtPct(e.margem_tolerancia_pct)}
+                {fmtPct(e.margem_minima_pct)} / {fmtPct(e.margem_alvo_pct)} / {fmtPct(e.margem_teto_pct)} / {fmtPct(e.margem_tolerancia_pct)}
               </td>
               <td className="p-3 text-right">
                 <div className="flex justify-end gap-3">

@@ -45,23 +45,27 @@ interface AppSettings {
   margem_tolerancia_pct: number;
   margem_minima_pct: number;
   margem_alvo_pct: number | null;
+  margem_teto_pct: number | null;
 }
 
 interface CurvaSettings {
   margem_minima_pct: number | null;
   margem_alvo_pct: number | null;
   margem_tolerancia_pct: number | null;
+  margem_teto_pct: number | null;
 }
 
 export interface ItemConfigRow {
   mlb: string;
   sku: string; // '' = item sem variação (ou variação não informada)
   cmv: number;
-  // Os três campos abaixo já vêm resolvidos pela cascata: valor do item >
-  // valor da curva (se o item tiver curva e ela tiver o campo definido) >
-  // valor geral do sistema (app_settings). Ver resolução em runUpdate().
+  // Os quatro campos abaixo já vêm resolvidos pela cascata: estratégia
+  // ativa (item ou curva) > valor do item > valor da curva (se o item
+  // tiver curva e ela tiver o campo definido) > valor geral do sistema
+  // (app_settings). Ver resolução em runUpdate().
   margem_minima_pct: number;
   margem_alvo_pct: number | null;
+  margem_teto_pct: number | null; // null = sem teto, nenhuma margem é "alta demais"
   toleranciaFrac: number; // fração (0.10 = 10%), já resolvida pela mesma cascata
 }
 
@@ -433,6 +437,9 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
       if (margemFrac < row.margem_minima_pct / 100 && !rejeitadaPorRow) {
         rejeitadaPorRow = `${rowLabel(row)}: margem resultante ${(margemFrac * 100).toFixed(1)}% fica abaixo do mínimo de ${row.margem_minima_pct}% (preço único do MLB nesta campanha é R$ ${preco.toFixed(2)}).`;
       }
+      if (row.margem_teto_pct != null && margemFrac > row.margem_teto_pct / 100 && !rejeitadaPorRow) {
+        rejeitadaPorRow = `${rowLabel(row)}: margem resultante ${(margemFrac * 100).toFixed(1)}% ultrapassa o teto de ${row.margem_teto_pct}% (preço único do MLB nesta campanha é R$ ${preco.toFixed(2)}).`;
+      }
     }
 
     // Desconto/score calculados sempre (mesmo quando rejeitada) — usado
@@ -497,11 +504,22 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
   // deve ser a sugestão de adesão, independente de pontuar menos que outra
   // campanha.
   const preNegociadasViaveis = poolMelhor.filter((e) => e.promo.promotion_type === "PRE_NEGOTIATED");
+
+  // Regra de negócio: campanha com redução de tarifa (desconto real na
+  // comissão, não só no score) já dentro da faixa de margem aceitável —
+  // `poolMelhor` só contém candidatas com margem entre o piso e o teto
+  // configurados — deve ser priorizada sobre as demais mesmo pontuando
+  // menos, já que o ganho de redução de tarifa nem sempre se reflete em
+  // score mais alto (pesa só indiretamente, via ml_participacao_pct).
+  const comReducaoDeTarifa = poolMelhor.filter((e) => estimarReducaoTarifa(e.promo) !== null);
+
   const melhor = preNegociadasViaveis.length > 0
     ? preNegociadasViaveis.reduce((best, cur) => (cur.score > best.score ? cur : best))
-    : poolMelhor.length > 0
-      ? poolMelhor.reduce((best, cur) => (cur.score > best.score ? cur : best))
-      : null;
+    : comReducaoDeTarifa.length > 0
+      ? comReducaoDeTarifa.reduce((best, cur) => (cur.score > best.score ? cur : best))
+      : poolMelhor.length > 0
+        ? poolMelhor.reduce((best, cur) => (cur.score > best.score ? cur : best))
+        : null;
 
   // Resolução definitiva de qual campanha "ativa" comparar com `melhor`:
   // se a própria `melhor` já estiver entre as ativas (ex.: já foi aplicada
@@ -530,7 +548,9 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
         const v = e.variacoes!.find((vv) => vv.sku === (row.sku || null));
         if (!v || v.margem_calculada_pct == null) return false;
         const pisoTolerado = row.margem_minima_pct * (1 - row.toleranciaFrac);
-        return v.margem_calculada_pct >= pisoTolerado;
+        if (v.margem_calculada_pct < pisoTolerado) return false;
+        if (row.margem_teto_pct != null && v.margem_calculada_pct > row.margem_teto_pct) return false;
+        return true;
       });
     });
     melhorTolerancia = candidatosTolerancia.length > 0
@@ -727,7 +747,7 @@ export async function* runUpdate(
 
   const { data: settingsRow } = await supabase
     .from("app_settings")
-    .select("taxas_pct, peso_desconto_pct, peso_ml_pct, peso_margem_pct, margem_tolerancia_pct, margem_minima_pct, margem_alvo_pct")
+    .select("taxas_pct, peso_desconto_pct, peso_ml_pct, peso_margem_pct, margem_tolerancia_pct, margem_minima_pct, margem_alvo_pct, margem_teto_pct")
     .eq("id", 1)
     .single();
   const settings = settingsRow as AppSettings;
@@ -740,11 +760,14 @@ export async function* runUpdate(
 
   const { data: curvaRows } = await supabase
     .from("curva_settings")
-    .select("curva, margem_minima_pct, margem_alvo_pct, margem_tolerancia_pct");
+    .select("curva, margem_minima_pct, margem_alvo_pct, margem_tolerancia_pct, margem_teto_pct");
   const curvaByLetra = new Map<string, CurvaSettings>(
     (curvaRows ?? []).map((c) => [
       c.curva as string,
-      { margem_minima_pct: c.margem_minima_pct, margem_alvo_pct: c.margem_alvo_pct, margem_tolerancia_pct: c.margem_tolerancia_pct },
+      {
+        margem_minima_pct: c.margem_minima_pct, margem_alvo_pct: c.margem_alvo_pct,
+        margem_tolerancia_pct: c.margem_tolerancia_pct, margem_teto_pct: c.margem_teto_pct,
+      },
     ]),
   );
 
@@ -756,7 +779,7 @@ export async function* runUpdate(
   const hojeISO = hojeBrasilia();
   const { data: estrategiasAtivas } = await supabase
     .from("estrategias")
-    .select("id, tipo_escopo, margem_minima_pct, margem_alvo_pct, margem_tolerancia_pct")
+    .select("id, tipo_escopo, margem_minima_pct, margem_alvo_pct, margem_tolerancia_pct, margem_teto_pct")
     .lte("data_inicio", hojeISO)
     .gte("data_fim", hojeISO);
   const estrategiaById = new Map((estrategiasAtivas ?? []).map((e) => [e.id, e]));
@@ -775,7 +798,8 @@ export async function* runUpdate(
       const e = estrategiaById.get(it.estrategia_id);
       if (e) {
         estrategiaPorMlb.set(it.mlb, {
-          margem_minima_pct: e.margem_minima_pct, margem_alvo_pct: e.margem_alvo_pct, margem_tolerancia_pct: e.margem_tolerancia_pct,
+          margem_minima_pct: e.margem_minima_pct, margem_alvo_pct: e.margem_alvo_pct,
+          margem_tolerancia_pct: e.margem_tolerancia_pct, margem_teto_pct: e.margem_teto_pct,
         });
       }
     }
@@ -791,7 +815,8 @@ export async function* runUpdate(
       const e = estrategiaById.get(c.estrategia_id);
       if (e) {
         estrategiaPorCurva.set(c.curva, {
-          margem_minima_pct: e.margem_minima_pct, margem_alvo_pct: e.margem_alvo_pct, margem_tolerancia_pct: e.margem_tolerancia_pct,
+          margem_minima_pct: e.margem_minima_pct, margem_alvo_pct: e.margem_alvo_pct,
+          margem_tolerancia_pct: e.margem_tolerancia_pct, margem_teto_pct: e.margem_teto_pct,
         });
       }
     }
@@ -805,7 +830,7 @@ export async function* runUpdate(
   for (let from = 0; ; from += 1000) {
     const { data: page, error: icErr } = await supabase
       .from("item_config")
-      .select("mlb, sku, cmv, margem_minima_pct, margem_alvo_pct, curva")
+      .select("mlb, sku, cmv, margem_minima_pct, margem_alvo_pct, margem_teto_pct, curva")
       .eq("participar_campanhas", true)
       .order("mlb", { ascending: true })
       .order("sku", { ascending: true })
@@ -824,7 +849,8 @@ export async function* runUpdate(
     // própria margem mínima já resolvida) se nenhum nível definir uma.
     const rawPage = page as {
       mlb: string; sku: string; cmv: number;
-      margem_minima_pct: number | null; margem_alvo_pct: number | null; curva: string | null;
+      margem_minima_pct: number | null; margem_alvo_pct: number | null; margem_teto_pct: number | null;
+      curva: string | null;
     }[];
     allRows.push(
       ...rawPage.map((r) => {
@@ -842,6 +868,9 @@ export async function* runUpdate(
           margem_alvo_pct:
             estrategiaItem?.margem_alvo_pct ?? estrategiaCurva?.margem_alvo_pct ??
             r.margem_alvo_pct ?? curvaCfg?.margem_alvo_pct ?? settings.margem_alvo_pct ?? null,
+          margem_teto_pct:
+            estrategiaItem?.margem_teto_pct ?? estrategiaCurva?.margem_teto_pct ??
+            r.margem_teto_pct ?? curvaCfg?.margem_teto_pct ?? settings.margem_teto_pct ?? null,
           toleranciaFrac:
             (estrategiaItem?.margem_tolerancia_pct ?? estrategiaCurva?.margem_tolerancia_pct ??
               curvaCfg?.margem_tolerancia_pct ?? settings.margem_tolerancia_pct) / 100,

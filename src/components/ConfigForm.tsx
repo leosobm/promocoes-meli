@@ -11,6 +11,7 @@ interface Settings {
   margem_tolerancia_pct: number;
   margem_minima_pct: number;
   margem_alvo_pct: number | null;
+  margem_teto_pct: number | null;
 }
 
 export default function ConfigForm({ initial }: { initial: Settings }) {
@@ -20,13 +21,18 @@ export default function ConfigForm({ initial }: { initial: Settings }) {
 
   const pesoTotal = values.peso_desconto_pct + values.peso_ml_pct + values.peso_margem_pct;
 
-  function setField(field: keyof Omit<Settings, "margem_alvo_pct">, v: string) {
+  function setField(field: keyof Omit<Settings, "margem_alvo_pct" | "margem_teto_pct">, v: string) {
     setValues((prev) => ({ ...prev, [field]: Number(v) }));
     setSaved(false);
   }
 
   function setMargemAlvo(v: string) {
     setValues((prev) => ({ ...prev, margem_alvo_pct: v === "" ? null : Number(v) }));
+    setSaved(false);
+  }
+
+  function setMargemTeto(v: string) {
+    setValues((prev) => ({ ...prev, margem_teto_pct: v === "" ? null : Number(v) }));
     setSaved(false);
   }
 
@@ -58,7 +64,7 @@ export default function ConfigForm({ initial }: { initial: Settings }) {
         <h2 className="mb-2 text-sm font-medium text-neutral-700">
           Margem geral do sistema
         </h2>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-3 gap-4">
           <div className="space-y-1">
             <label className="block text-xs text-neutral-500">Margem mínima geral (%)</label>
             <input
@@ -84,10 +90,25 @@ export default function ConfigForm({ initial }: { initial: Settings }) {
               className="w-full rounded-md border border-neutral-300 px-3 py-2 text-sm"
             />
           </div>
+          <div className="space-y-1">
+            <label className="block text-xs text-neutral-500">Teto de margem geral (%) — opcional</label>
+            <input
+              type="number"
+              step="0.1"
+              min="0"
+              max="99"
+              value={values.margem_teto_pct ?? ""}
+              onChange={(e) => setMargemTeto(e.target.value)}
+              placeholder="vazio = sem teto"
+              className="w-full rounded-md border border-neutral-300 px-3 py-2 text-sm"
+            />
+          </div>
         </div>
         <p className="mt-2 text-xs text-neutral-500">
           Usadas para qualquer item cadastrado <b>sem</b> margem própria (em Itens) — item com
-          margem definida no cadastro sempre usa a dele, nunca a geral daqui.
+          margem definida no cadastro sempre usa a dele, nunca a geral daqui. Teto: campanha cuja
+          margem resultante ultrapasse esse valor nunca é escolhida/aplicada automaticamente —
+          vazio = sem limite superior.
         </p>
       </div>
 

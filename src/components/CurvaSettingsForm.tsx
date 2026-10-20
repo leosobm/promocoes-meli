@@ -8,6 +8,7 @@ interface CurvaRow {
   margem_minima_pct: number | null;
   margem_alvo_pct: number | null;
   margem_tolerancia_pct: number | null;
+  margem_teto_pct: number | null;
 }
 
 function parseField(v: string): number | null {
@@ -42,6 +43,7 @@ export default function CurvaSettingsForm({ initial }: { initial: CurvaRow[] }) 
               <th className="py-1 pr-2">Curva</th>
               <th className="py-1 pr-2">Margem mínima (%)</th>
               <th className="py-1 pr-2">Margem alvo (%)</th>
+              <th className="py-1 pr-2">Teto (%)</th>
               <th className="py-1 pr-2">Tolerância (%)</th>
             </tr>
           </thead>
@@ -69,6 +71,18 @@ export default function CurvaSettingsForm({ initial }: { initial: CurvaRow[] }) 
                     max="99"
                     value={r.margem_alvo_pct ?? ""}
                     onChange={(e) => setField(r.curva, "margem_alvo_pct", e.target.value)}
+                    placeholder="geral"
+                    className="w-28 rounded-md border border-neutral-300 px-2 py-1.5 text-sm"
+                  />
+                </td>
+                <td className="py-2 pr-2">
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    max="99"
+                    value={r.margem_teto_pct ?? ""}
+                    onChange={(e) => setField(r.curva, "margem_teto_pct", e.target.value)}
                     placeholder="geral"
                     className="w-28 rounded-md border border-neutral-300 px-2 py-1.5 text-sm"
                   />

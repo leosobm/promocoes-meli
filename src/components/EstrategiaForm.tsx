@@ -18,6 +18,7 @@ export interface EstrategiaInitial {
   tipo_escopo: "item" | "curva";
   margem_minima_pct: number | null;
   margem_alvo_pct: number | null;
+  margem_teto_pct: number | null;
   margem_tolerancia_pct: number | null;
   mlbs: string[];
   curvas: string[];
@@ -33,6 +34,7 @@ export default function EstrategiaForm({ initial }: { initial?: EstrategiaInitia
   const [tipoEscopo, setTipoEscopo] = useState<"item" | "curva">(initial?.tipo_escopo ?? "item");
   const [margemMinima, setMargemMinima] = useState(initial?.margem_minima_pct?.toString() ?? "");
   const [margemAlvo, setMargemAlvo] = useState(initial?.margem_alvo_pct?.toString() ?? "");
+  const [margemTeto, setMargemTeto] = useState(initial?.margem_teto_pct?.toString() ?? "");
   const [margemTolerancia, setMargemTolerancia] = useState(initial?.margem_tolerancia_pct?.toString() ?? "");
   const [curvasSelecionadas, setCurvasSelecionadas] = useState<Set<string>>(new Set(initial?.curvas ?? []));
   const [itensSelecionados, setItensSelecionados] = useState<ItemSelecionado[]>(
@@ -128,6 +130,7 @@ export default function EstrategiaForm({ initial }: { initial?: EstrategiaInitia
         tipo_escopo: tipoEscopo,
         margem_minima_pct: margemMinima === "" ? null : Number(margemMinima),
         margem_alvo_pct: margemAlvo === "" ? null : Number(margemAlvo),
+        margem_teto_pct: margemTeto === "" ? null : Number(margemTeto),
         margem_tolerancia_pct: margemTolerancia === "" ? null : Number(margemTolerancia),
         mlbs: tipoEscopo === "item" ? itensSelecionados.map((i) => i.mlb) : [],
         curvas: tipoEscopo === "curva" ? [...curvasSelecionadas] : [],
@@ -186,7 +189,7 @@ export default function EstrategiaForm({ initial }: { initial?: EstrategiaInitia
           </div>
         </div>
 
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-4 gap-4">
           <div className="space-y-1">
             <label className="block text-xs text-neutral-500">Margem mínima (%)</label>
             <input
@@ -203,6 +206,16 @@ export default function EstrategiaForm({ initial }: { initial?: EstrategiaInitia
               type="number" step="0.1" min="0" max="99"
               value={margemAlvo}
               onChange={(e) => setMargemAlvo(e.target.value)}
+              placeholder="não altera"
+              className="w-full rounded-md border border-neutral-300 px-3 py-2 text-sm"
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="block text-xs text-neutral-500">Teto (%)</label>
+            <input
+              type="number" step="0.1" min="0" max="99"
+              value={margemTeto}
+              onChange={(e) => setMargemTeto(e.target.value)}
               placeholder="não altera"
               className="w-full rounded-md border border-neutral-300 px-3 py-2 text-sm"
             />

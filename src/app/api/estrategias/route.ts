@@ -12,6 +12,7 @@ const BODY_SCHEMA = z.object({
   tipo_escopo: z.enum(["item", "curva"]),
   margem_minima_pct: z.coerce.number().min(0).max(99).optional().nullable(),
   margem_alvo_pct: z.coerce.number().min(0).max(99).optional().nullable(),
+  margem_teto_pct: z.coerce.number().min(0).max(99).optional().nullable(),
   margem_tolerancia_pct: z.coerce.number().min(0).max(100).optional().nullable(),
   mlbs: z.array(z.string().trim().min(1)).optional().default([]),
   curvas: z.array(z.enum(["A", "B", "C", "D", "Lançamento"])).optional().default([]),
@@ -26,7 +27,7 @@ export async function GET() {
   const supabase = createServiceSupabase();
   const { data: estrategias, error } = await supabase
     .from("estrategias")
-    .select("id, nome, data_inicio, data_fim, tipo_escopo, margem_minima_pct, margem_alvo_pct, margem_tolerancia_pct, created_at")
+    .select("id, nome, data_inicio, data_fim, tipo_escopo, margem_minima_pct, margem_alvo_pct, margem_teto_pct, margem_tolerancia_pct, created_at")
     .order("data_inicio", { ascending: false });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
@@ -90,6 +91,7 @@ export async function POST(request: NextRequest) {
       tipo_escopo: body.tipo_escopo,
       margem_minima_pct: body.margem_minima_pct ?? null,
       margem_alvo_pct: body.margem_alvo_pct ?? null,
+      margem_teto_pct: body.margem_teto_pct ?? null,
       margem_tolerancia_pct: body.margem_tolerancia_pct ?? null,
     })
     .select("id")

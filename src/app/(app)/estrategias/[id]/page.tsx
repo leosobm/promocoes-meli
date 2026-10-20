@@ -11,7 +11,7 @@ export default async function EditarEstrategiaPage({ params }: { params: Promise
   const supabase = await createServerSupabase();
   const { data: estrategia } = await supabase
     .from("estrategias")
-    .select("id, nome, data_inicio, data_fim, tipo_escopo, margem_minima_pct, margem_alvo_pct, margem_tolerancia_pct")
+    .select("id, nome, data_inicio, data_fim, tipo_escopo, margem_minima_pct, margem_alvo_pct, margem_teto_pct, margem_tolerancia_pct")
     .eq("id", id)
     .maybeSingle();
   if (!estrategia) notFound();

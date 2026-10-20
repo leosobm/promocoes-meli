@@ -12,7 +12,7 @@ export default async function ConfigPage() {
   const supabase = await createServerSupabase();
   const { data: settings } = await supabase
     .from("app_settings")
-    .select("taxas_pct, peso_desconto_pct, peso_ml_pct, peso_margem_pct, margem_tolerancia_pct, margem_minima_pct, margem_alvo_pct")
+    .select("taxas_pct, peso_desconto_pct, peso_ml_pct, peso_margem_pct, margem_tolerancia_pct, margem_minima_pct, margem_alvo_pct, margem_teto_pct")
     .eq("id", 1)
     .single();
   const { data: users } = await supabase
@@ -21,7 +21,7 @@ export default async function ConfigPage() {
     .order("created_at", { ascending: true });
   const { data: curvas } = await supabase
     .from("curva_settings")
-    .select("curva, margem_minima_pct, margem_alvo_pct, margem_tolerancia_pct")
+    .select("curva, margem_minima_pct, margem_alvo_pct, margem_tolerancia_pct, margem_teto_pct")
     .order("curva", { ascending: true });
 
   return (
@@ -37,7 +37,7 @@ export default async function ConfigPage() {
           initial={
             settings ?? {
               taxas_pct: 0, peso_desconto_pct: 40, peso_ml_pct: 35, peso_margem_pct: 25, margem_tolerancia_pct: 0,
-              margem_minima_pct: 12, margem_alvo_pct: null,
+              margem_minima_pct: 12, margem_alvo_pct: null, margem_teto_pct: null,
             }
           }
         />
@@ -58,7 +58,7 @@ export default async function ConfigPage() {
             curvas && curvas.length === 5
               ? curvas
               : (["A", "B", "C", "D", "Lançamento"] as const).map((curva) => ({
-                  curva, margem_minima_pct: null, margem_alvo_pct: null, margem_tolerancia_pct: null,
+                  curva, margem_minima_pct: null, margem_alvo_pct: null, margem_tolerancia_pct: null, margem_teto_pct: null,
                 }))
           }
         />

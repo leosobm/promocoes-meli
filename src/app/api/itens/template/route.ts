@@ -12,6 +12,7 @@ export async function GET() {
       cmv: 45.9,
       margem_minima_pct: 12,
       margem_alvo_pct: 20,
+      margem_teto_pct: "",
       curva: "",
       participar_campanhas: "SIM",
     },
@@ -25,26 +26,31 @@ export async function GET() {
       cmv: 49.9,
       margem_minima_pct: 12,
       margem_alvo_pct: 20,
+      margem_teto_pct: "",
       curva: "",
       participar_campanhas: "SIM",
     },
     {
+      // Com teto de margem: campanha que resultaria em margem acima de 35%
+      // nunca é escolhida/aplicada automaticamente pra esse item.
       mlb: "MLB9876543210",
       sku: "",
       cmv: 120,
       margem_minima_pct: 15,
       margem_alvo_pct: "",
+      margem_teto_pct: 35,
       curva: "",
       participar_campanhas: "SIM",
     },
     {
       // Sem margem própria, mas com curva A — usa a margem mínima/alvo/
-      // tolerância da curva A, definida em Configurações.
+      // teto/tolerância da curva A, definida em Configurações.
       mlb: "MLB4444444444",
       sku: "",
       cmv: 18,
       margem_minima_pct: "",
       margem_alvo_pct: "",
+      margem_teto_pct: "",
       curva: "A",
       participar_campanhas: "SIM",
     },
@@ -56,26 +62,28 @@ export async function GET() {
       cmv: 22,
       margem_minima_pct: "",
       margem_alvo_pct: "",
+      margem_teto_pct: "",
       curva: "Lançamento",
       participar_campanhas: "SIM",
     },
     {
-      // Sem margem própria e sem curva — usa a margem mínima/alvo/
+      // Sem margem própria e sem curva — usa a margem mínima/alvo/teto/
       // tolerância geral do sistema, definida em Configurações.
       mlb: "MLB5555555555",
       sku: "",
       cmv: 30,
       margem_minima_pct: "",
       margem_alvo_pct: "",
+      margem_teto_pct: "",
       curva: "",
       participar_campanhas: "SIM",
     },
   ];
   const wsModelo = XLSX.utils.json_to_sheet(modeloRows, {
-    header: ["mlb", "sku", "cmv", "margem_minima_pct", "margem_alvo_pct", "curva", "participar_campanhas"],
+    header: ["mlb", "sku", "cmv", "margem_minima_pct", "margem_alvo_pct", "margem_teto_pct", "curva", "participar_campanhas"],
   });
   wsModelo["!cols"] = [
-    { wch: 18 }, { wch: 20 }, { wch: 10 }, { wch: 18 }, { wch: 16 }, { wch: 8 }, { wch: 20 },
+    { wch: 18 }, { wch: 20 }, { wch: 10 }, { wch: 18 }, { wch: 16 }, { wch: 16 }, { wch: 8 }, { wch: 20 },
   ];
   XLSX.utils.book_append_sheet(wb, wsModelo, "Modelo");
 
@@ -113,6 +121,13 @@ export async function GET() {
       Descrição:
         "Margem 'ideal', em %. Usada para CALCULAR o preço em campanhas onde você define o preço (DEAL, SELLER_CAMPAIGN, LIGHTNING, DOD). Se vazio, usa a margem alvo GERAL de Configurações; se essa também estiver vazia, usa a margem mínima (do item ou geral) como alvo.",
       "Formato / Exemplo": "20",
+    },
+    {
+      Coluna: "margem_teto_pct",
+      "Obrigatório?": "Não",
+      Descrição:
+        "Teto de margem, em %. O sistema NUNCA escolhe/adere a uma campanha cuja margem resultante ultrapasse isso — serve pra evitar campanhas com desconto pequeno demais pra valer a pena. Se vazio, usa o teto da curva (se tiver) ou o teto GERAL de Configurações; se nenhum estiver definido, não há limite superior.",
+      "Formato / Exemplo": "35  (= 35%, não 0.35)",
     },
     {
       Coluna: "curva",

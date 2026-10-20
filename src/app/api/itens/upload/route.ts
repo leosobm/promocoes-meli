@@ -6,10 +6,12 @@ import { requireAdmin } from "@/lib/auth/requireAdmin";
 
 /**
  * Aceita .csv ou .xlsx com as colunas (nomes flexíveis, ver COLUMN_ALIASES):
- *   mlb, sku?, cmv, margem_minima_pct?, margem_alvo_pct?, curva?, participar_campanhas?
- * margem_minima_pct/margem_alvo_pct em branco usam a margem da curva do
- * item (se tiver) ou a margem geral do sistema (Configurações) — cascata
- * de 3 níveis em decisionEngine.ts. curva aceita A, B, C, D ou Lançamento.
+ *   mlb, sku?, cmv, margem_minima_pct?, margem_alvo_pct?, margem_teto_pct?, curva?, participar_campanhas?
+ * margem_minima_pct/margem_alvo_pct/margem_teto_pct em branco usam a
+ * margem da curva do item (se tiver) ou a margem geral do sistema
+ * (Configurações) — cascata em decisionEngine.ts. curva aceita A, B, C, D
+ * ou Lançamento. margem_teto_pct: campanha cuja margem resultante
+ * ultrapasse esse valor nunca é escolhida/aplicada automaticamente.
  * Faz upsert em item_config pela chave composta (mlb, sku) — um MLB pode
  * aparecer em várias linhas, uma por SKU/variação (a API de Promoções do ML
  * grava o preço promocional a nível de MLB, não de variação, então o motor
@@ -30,6 +32,9 @@ const ROW_SCHEMA = z.object({
   // (Configurações) — ver decisionEngine.ts / migração margem_geral.
   margem_minima_pct: z.coerce.number().min(0).max(99, "margem_minima_pct deve estar entre 0 e 99").optional().nullable(),
   margem_alvo_pct: z.coerce.number().min(0).max(99).optional().nullable(),
+  // Opcional: teto de margem — campanha cuja margem resultante ultrapasse
+  // esse valor nunca é escolhida/aplicada automaticamente pro item.
+  margem_teto_pct: z.coerce.number().min(0).max(99).optional().nullable(),
   // Opcional: liga o item a uma estratégia de margem por curva
   // (Configurações) — entra na cascata entre o item e a margem geral.
   curva: z.enum(CURVAS_VALIDAS).optional().nullable(),
@@ -61,6 +66,9 @@ const COLUMN_ALIASES: Record<string, string> = {
   margem_alvo_pct: "margem_alvo_pct",
   "margem alvo": "margem_alvo_pct",
   margem: "margem_alvo_pct",
+  margem_teto_pct: "margem_teto_pct",
+  "margem teto": "margem_teto_pct",
+  teto: "margem_teto_pct",
   curva: "curva",
   "curva abc": "curva",
   participar_campanhas: "participar_campanhas",
@@ -106,6 +114,7 @@ export async function POST(request: NextRequest) {
     }
     if (mapped.margem_alvo_pct === "") mapped.margem_alvo_pct = undefined;
     if (mapped.margem_minima_pct === "") mapped.margem_minima_pct = undefined;
+    if (mapped.margem_teto_pct === "") mapped.margem_teto_pct = undefined;
     if (typeof mapped.curva === "string") {
       mapped.curva = mapped.curva.trim() === "" ? undefined : normalizeCurva(mapped.curva);
     }
@@ -154,6 +163,7 @@ export async function POST(request: NextRequest) {
       cmv: r.cmv,
       margem_minima_pct: r.margem_minima_pct ?? null,
       margem_alvo_pct: r.margem_alvo_pct ?? null,
+      margem_teto_pct: r.margem_teto_pct ?? null,
       curva: r.curva ?? null,
       participar_campanhas: r.participar_campanhas,
       updated_at: new Date().toISOString(),

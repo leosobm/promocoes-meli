@@ -21,7 +21,7 @@ async function main() {
 
   const { data: settingsRowRaw } = await supabase
     .from("app_settings")
-    .select("taxas_pct, peso_desconto_pct, peso_ml_pct, peso_margem_pct, margem_tolerancia_pct, margem_minima_pct, margem_alvo_pct")
+    .select("taxas_pct, peso_desconto_pct, peso_ml_pct, peso_margem_pct, margem_tolerancia_pct, margem_minima_pct, margem_alvo_pct, margem_teto_pct")
     .eq("id", 1)
     .single();
   if (!settingsRowRaw) {
@@ -31,12 +31,12 @@ async function main() {
   const settingsRow = settingsRowRaw;
   const { data: curvaRows } = await supabase
     .from("curva_settings")
-    .select("curva, margem_minima_pct, margem_alvo_pct, margem_tolerancia_pct");
+    .select("curva, margem_minima_pct, margem_alvo_pct, margem_tolerancia_pct, margem_teto_pct");
   const curvaByLetra = new Map((curvaRows ?? []).map((c) => [c.curva, c]));
 
   const { data: rawRows } = await supabase
     .from("item_config")
-    .select("mlb, sku, cmv, margem_minima_pct, margem_alvo_pct, curva")
+    .select("mlb, sku, cmv, margem_minima_pct, margem_alvo_pct, margem_teto_pct, curva")
     .eq("mlb", mlb);
 
   if (!rawRows || rawRows.length === 0) {
@@ -44,8 +44,9 @@ async function main() {
     process.exit(1);
   }
 
-  // Mesma cascata de 3 níveis que runUpdate() aplica: item > curva > geral
-  // do sistema (ver 20261008000000_curva_item.sql).
+  // Cascata simplificada pra diagnóstico manual (item > curva > geral do
+  // sistema — NÃO inclui estratégias, ver a cascata completa de 5 níveis
+  // em runUpdate()).
   const rows = rawRows.map((r) => {
     const curvaCfg = r.curva ? curvaByLetra.get(r.curva) : undefined;
     const margemMinimaEfetiva = r.margem_minima_pct ?? curvaCfg?.margem_minima_pct ?? settingsRow.margem_minima_pct;
@@ -53,6 +54,7 @@ async function main() {
       ...r,
       margem_minima_pct: margemMinimaEfetiva,
       margem_alvo_pct: r.margem_alvo_pct ?? curvaCfg?.margem_alvo_pct ?? settingsRow.margem_alvo_pct ?? null,
+      margem_teto_pct: r.margem_teto_pct ?? curvaCfg?.margem_teto_pct ?? settingsRow.margem_teto_pct ?? null,
       toleranciaFrac: (curvaCfg?.margem_tolerancia_pct ?? settingsRow.margem_tolerancia_pct) / 100,
     };
   });

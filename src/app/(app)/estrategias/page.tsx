@@ -12,7 +12,7 @@ export default async function EstrategiasPage() {
   const supabase = await createServerSupabase();
   const { data: estrategias } = await supabase
     .from("estrategias")
-    .select("id, nome, data_inicio, data_fim, tipo_escopo, margem_minima_pct, margem_alvo_pct, margem_tolerancia_pct")
+    .select("id, nome, data_inicio, data_fim, tipo_escopo, margem_minima_pct, margem_alvo_pct, margem_teto_pct, margem_tolerancia_pct")
     .order("data_inicio", { ascending: false });
 
   const ids = (estrategias ?? []).map((e) => e.id);
