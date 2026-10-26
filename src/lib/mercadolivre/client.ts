@@ -317,15 +317,33 @@ export class MercadoLivreClient {
     };
   }
 
+  /**
+   * Custo de frete que efetivamente sai do bolso do vendedor — NÃO é
+   * sempre o custo do "frete grátis". O parâmetro `free_shipping` desse
+   * endpoint força a API a simular um cenário: "True" devolve o que o
+   * frete grátis custaria (mesmo que o item não ofereça), "False"/omitido
+   * devolve o custo real pro modo de envio que o item JÁ tem configurado.
+   * Confirmado na prática com um item que oferece frete por conta do
+   * comprador (shipping.free_shipping=false): forçar "True" devolvia
+   * R$15,05 (custo hipotético de frete grátis), enquanto o valor real
+   * (contribuição obrigatória do vendedor no frete pago pelo comprador)
+   * era R$8,75 — quase metade, e o único jeito de obter o certo é NÃO
+   * forçar free_shipping=True quando o item não oferece frete grátis de
+   * verdade. Pra item que já tem free_shipping=true, os dois cenários
+   * batem (testado), então não há regressão em usar sempre o valor real.
+   */
   async getFreeShippingCost(userId: number, item: ItemDetail): Promise<FreeShippingCostResult> {
+    const freteGratisReal = item.shipping?.free_shipping ? "True" : "False";
+    const modoLabel = item.shipping?.free_shipping ? "frete grátis" : "frete pago pelo comprador";
+
     const { status, data } = await this.request<{
       coverage?: { all_country?: { list_cost?: number } };
     }>("GET", `/users/${userId}/shipping_options/free`, {
-      params: { item_id: item.id, free_shipping: "True", verbose: "true" },
+      params: { item_id: item.id, free_shipping: freteGratisReal, verbose: "true" },
     });
     const coverage = data?.coverage?.all_country;
     if (status === 200 && coverage) {
-      return { ok: true, method: "item_id", list_cost: coverage.list_cost };
+      return { ok: true, method: `item_id (${modoLabel})`, list_cost: coverage.list_cost };
     }
 
     const dims = item.shipping?.dimensions;
@@ -338,7 +356,7 @@ export class MercadoLivreClient {
       params: {
         dimensions: dims,
         item_price: item.price,
-        free_shipping: "True",
+        free_shipping: freteGratisReal,
         verbose: "true",
         category_id: item.category_id,
         listing_type_id: item.listing_type_id,
@@ -347,9 +365,9 @@ export class MercadoLivreClient {
     });
     const coverage2 = data2?.coverage?.all_country;
     if (status2 === 200 && coverage2) {
-      return { ok: true, method: "dimensions (fallback)", list_cost: coverage2.list_cost };
+      return { ok: true, method: `dimensions (fallback, ${modoLabel})`, list_cost: coverage2.list_cost };
     }
-    return { ok: false, error: "sem cobertura de frete grátis (item_id e fallback falharam)" };
+    return { ok: false, error: "sem cobertura de frete (item_id e fallback falharam)" };
   }
 
   /**
