@@ -309,28 +309,33 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
     const descontoTarifaValor = tarifaEstimada?.valor ?? 0;
     const priceCtx = { freteMedio, taxasPct: ctx.taxasPct, comissaoPct, descontoTarifaPct: descontoTarifaPctFrac };
 
-    // LIGHTNING exige reservar um "stock" no join, dentro de uma faixa
-    // ABERTA (exclusiva nas duas pontas) devolvida pela própria API — a
-    // mensagem de erro real é literal: "Stock must be greater than X and
-    // less than Y", ou seja, min e max NÃO são valores aceitos, só o que
-    // fica estritamente entre eles (visto na prática: min=5 rejeitou com
-    // stock=5, só aceitou a partir de 6). Reserva o mínimo utilizável
-    // (min + 1), não o estoque disponível inteiro — deixa o resto livre
-    // pra venda normal fora da oferta relâmpago. Rejeita de cara quando
-    // nem esse mínimo cabe no estoque disponível ou quando a faixa é
-    // estreita demais pra ter algum valor válido no meio.
+    // Tipos com extraJoinFields "stock" exigem reservar um estoque no
+    // join — mas a faixa aceita varia por tipo (confirmado na doc oficial
+    // de cada um): LIGHTNING é ABERTA/exclusiva (min e max NÃO são
+    // aceitos, só o que fica estritamente entre eles — a mensagem de erro
+    // real é literal "Stock must be greater than X and less than Y", visto
+    // em produção: min=5 rejeitou com stock=5, só aceitou a partir de 6).
+    // SMART_LIGHTNING é FECHADA/inclusiva (min e max são aceitos, doc:
+    // "deve ser um inteiro positivo entre stock.min e stock.max,
+    // inclusive"). Sempre reserva o mínimo utilizável pra cada faixa, não
+    // o estoque disponível inteiro — deixa o resto livre pra venda normal
+    // fora da oferta.
     let stockSugerido: number | null = null;
     let estoqueInsuficiente: string | null = null;
     if (typeCfg.extraJoinFields === "stock") {
       const min = promo.stock?.min ?? null;
       const max = promo.stock?.max ?? null;
       const disponivel = detail.available_quantity ?? null;
+      const inclusivo = typeCfg.stockBounds === "inclusive";
       if (min != null && max != null && disponivel != null) {
-        const minUtilizavel = min + 1;
-        if (minUtilizavel >= max) {
-          estoqueInsuficiente = `Faixa de estoque da campanha (entre ${min} e ${max}, exclusive) não deixa nenhum valor válido.`;
+        const minUtilizavel = inclusivo ? min : min + 1;
+        const faixaVazia = inclusivo ? minUtilizavel > max : minUtilizavel >= max;
+        if (faixaVazia) {
+          estoqueInsuficiente = inclusivo
+            ? `Faixa de estoque da campanha (entre ${min} e ${max}, inclusive) está vazia (min maior que max).`
+            : `Faixa de estoque da campanha (entre ${min} e ${max}, exclusive) não deixa nenhum valor válido.`;
         } else if (disponivel < minUtilizavel) {
-          estoqueInsuficiente = `Estoque disponível do anúncio (${disponivel}) é menor que o mínimo utilizável pela campanha (${minUtilizavel}, já que ${min} não é aceito) — não é possível aderir.`;
+          estoqueInsuficiente = `Estoque disponível do anúncio (${disponivel}) é menor que o mínimo utilizável pela campanha (${minUtilizavel}${inclusivo ? "" : `, já que ${min} não é aceito`}) — não é possível aderir.`;
         } else {
           stockSugerido = minUtilizavel;
         }

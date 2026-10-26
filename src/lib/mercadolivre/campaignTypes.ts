@@ -22,7 +22,15 @@ export interface CampaignTypeConfig {
   writeSupported: boolean;
   priceMode: "seller_defined" | "fixed_by_ml" | "no_price";
   requiresOfferId: boolean; // no POST de adesão
-  extraJoinFields?: "stock" | "percentages"; // LIGHTNING exige "stock" reservado; BANK exige meli_percentage/seller_percentage (PIX_OPTIN_PERCENTAGE_NULL_ERROR sem isso, visto em produção)
+  extraJoinFields?: "stock" | "percentages"; // LIGHTNING/SMART_LIGHTNING exigem "stock" reservado; BANK exige meli_percentage/seller_percentage (PIX_OPTIN_PERCENTAGE_NULL_ERROR sem isso, visto em produção)
+  // Só relevante com extraJoinFields "stock" — confirmado na doc oficial
+  // que os dois tipos usam faixas DIFERENTES: LIGHTNING é aberta/exclusiva
+  // (min e max não são aceitos, só o que fica estritamente entre eles —
+  // "Stock must be greater than X and less than Y", visto em produção),
+  // SMART_LIGHTNING é fechada/inclusiva (min e max são aceitos). Default
+  // "exclusive" quando omitido, pra não mudar o comportamento já validado
+  // do LIGHTNING.
+  stockBounds?: "exclusive" | "inclusive";
   deleteRequiresOfferId: boolean;
   canDeleteAfterActive: boolean; // false = doc diz explicitamente que não dá pra remover depois de ativa
   sourceUrl: string;
@@ -97,9 +105,22 @@ export const CAMPAIGN_TYPES: Record<string, CampaignTypeConfig> = {
     priceMode: "seller_defined",
     requiresOfferId: false,
     extraJoinFields: "stock",
+    stockBounds: "exclusive",
     deleteRequiresOfferId: false,
     canDeleteAfterActive: false, // doc: "Once activated, offers cannot be deleted" — só pausar o anúncio
     sourceUrl: "https://developers.mercadolibre.com.ar/en_us/lightning-deal",
+  },
+  SMART_LIGHTNING: {
+    type: "SMART_LIGHTNING",
+    label: "Relâmpago Cofinanciada (Smart)",
+    writeSupported: true,
+    priceMode: "fixed_by_ml", // doc: "Não envie preço, contribuições nem datas no body"
+    requiresOfferId: true,
+    extraJoinFields: "stock",
+    stockBounds: "inclusive", // doc: "deve ser... entre stock.min e stock.max, inclusive"
+    deleteRequiresOfferId: true,
+    canDeleteAfterActive: false, // doc: só remove enquanto "pending" (antes de "started")
+    sourceUrl: "https://developers.mercadolivre.com.br/pt_br/campanhas-smart-price-matching#Participar-de-SMART_LIGHTNING-com-o-estoque-escolhido",
   },
   DOD: {
     type: "DOD",
