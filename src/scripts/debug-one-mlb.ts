@@ -89,7 +89,7 @@ async function main() {
 
   const { data: back } = await supabase
     .from("campaign_decisions")
-    .select("id, mlb, promotion_type, escolhida, gravavel, status, margem_calculada_pct, score, troca, dentro_tolerancia, recomendacao, campanha_anterior_tipo, motivo")
+    .select("id, mlb, promotion_type, escolhida, gravavel, status, preco_atual, preco_proposto, margem_calculada_pct, score, troca, dentro_tolerancia, recomendacao, campanha_anterior_tipo, motivo")
     .eq("run_id", ctx.runId);
   console.log(">> Lido de volta do banco:", JSON.stringify(back, null, 2));
 

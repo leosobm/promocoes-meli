@@ -10,6 +10,7 @@ export interface DecisionRow {
   promotion_type: string;
   preco_proposto: number | null;
   preco_original: number | null;
+  preco_atual: number | null;
   margem_calculada_pct: number | null;
   desconto_consumidor_pct: number | null;
   ml_participacao_pct: number | null;
@@ -61,11 +62,37 @@ function average(nums: number[]): number | null {
   return valid.reduce((a, b) => a + b, 0) / valid.length;
 }
 
-type SortField = "mlb" | "margem" | "score" | "preco" | "desconto";
+type SortField = "mlb" | "margem" | "score" | "preco" | "precoAtual" | "desconto";
 type SortDir = "asc" | "desc";
 
 const PAGE_SIZE = 50;
 const BATCH_CONFIRM_THRESHOLD = 100;
+
+function SortHeader({
+  field,
+  children,
+  align = "right",
+  sortField,
+  sortDir,
+  onSort,
+}: {
+  field: SortField;
+  children: React.ReactNode;
+  align?: "left" | "right";
+  sortField: SortField;
+  sortDir: SortDir;
+  onSort: (field: SortField) => void;
+}) {
+  const active = sortField === field;
+  return (
+    <th
+      className={`cursor-pointer select-none p-3 ${align === "right" ? "text-right" : "text-left"} hover:text-neutral-900`}
+      onClick={() => onSort(field)}
+    >
+      {children} {active ? (sortDir === "asc" ? "▲" : "▼") : ""}
+    </th>
+  );
+}
 
 export default function DecisionTable({
   rows,
@@ -132,6 +159,7 @@ export default function DecisionTable({
         case "margem": return r.margem_calculada_pct ?? -Infinity;
         case "score": return r.score ?? -Infinity;
         case "preco": return r.preco_proposto ?? -Infinity;
+        case "precoAtual": return r.preco_atual ?? -Infinity;
         case "desconto": return r.desconto_consumidor_pct ?? -Infinity;
         default: return r.mlb;
       }
@@ -264,18 +292,6 @@ export default function DecisionTable({
     }
   }
 
-  function SortHeader({ field, children, align = "right" }: { field: SortField; children: React.ReactNode; align?: "left" | "right" }) {
-    const active = sortField === field;
-    return (
-      <th
-        className={`cursor-pointer select-none p-3 ${align === "right" ? "text-right" : "text-left"} hover:text-neutral-900`}
-        onClick={() => sortBy(field)}
-      >
-        {children} {active ? (sortDir === "asc" ? "▲" : "▼") : ""}
-      </th>
-    );
-  }
-
   if (rows.length === 0) return null;
 
   const bannerClass = variant === "tolerancia" ? "border-orange-200 bg-orange-50" : "border-neutral-200 bg-white";
@@ -365,14 +381,15 @@ export default function DecisionTable({
               <th className="p-3">
                 <input type="checkbox" checked={allFilteredSelected} onChange={selectAllFiltered} />
               </th>
-              <SortHeader field="mlb" align="left">MLB / Título</SortHeader>
+              <SortHeader field="mlb" align="left" sortField={sortField} sortDir={sortDir} onSort={sortBy}>MLB / Título</SortHeader>
               <th className="p-3">Campanha</th>
               <th className="p-3">Recomendação</th>
-              <SortHeader field="preco">Preço</SortHeader>
-              <SortHeader field="desconto">Desconto</SortHeader>
-              <SortHeader field="margem">Margem</SortHeader>
+              <SortHeader field="precoAtual" sortField={sortField} sortDir={sortDir} onSort={sortBy}>Preço Atual</SortHeader>
+              <SortHeader field="preco" sortField={sortField} sortDir={sortDir} onSort={sortBy}>Preço Proposto</SortHeader>
+              <SortHeader field="desconto" sortField={sortField} sortDir={sortDir} onSort={sortBy}>Desconto</SortHeader>
+              <SortHeader field="margem" sortField={sortField} sortDir={sortDir} onSort={sortBy}>Margem</SortHeader>
               <th className="p-3 text-right">Incentivo ML</th>
-              <SortHeader field="score">Score</SortHeader>
+              <SortHeader field="score" sortField={sortField} sortDir={sortDir} onSort={sortBy}>Score</SortHeader>
               <th className="p-3">Motivo</th>
             </tr>
           </thead>
@@ -400,6 +417,7 @@ export default function DecisionTable({
                     </span>
                   )}
                 </td>
+                <td className="p-3 text-right text-neutral-500">{fmtMoney(r.preco_atual)}</td>
                 <td className="p-3 text-right">{fmtMoney(r.preco_proposto)}</td>
                 <td className="p-3 text-right">{fmtPct(r.desconto_consumidor_pct)}</td>
                 <td className="p-3 text-right">{fmtPct(r.margem_calculada_pct)}</td>

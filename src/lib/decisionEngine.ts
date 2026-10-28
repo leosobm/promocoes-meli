@@ -82,6 +82,7 @@ interface DecisionInsertRow {
   offer_id?: string | null;
   preco_proposto?: number | null;
   preco_original?: number | null;
+  preco_atual?: number | null;
   margem_calculada_pct?: number | null;
   desconto_consumidor_pct?: number | null;
   ml_participacao_pct?: number | null;
@@ -539,6 +540,16 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
       entradasAtivas.find((e) => e.promo.promotion_id === melhor.promo.promotion_id)) ||
     ativaEntryPreliminar;
 
+  // Preço que o item REALMENTE vende por agora, pra mostrar lado a lado
+  // com o preço proposto no painel — o ML exibe o MENOR preço entre
+  // campanhas ativas simultâneas (ver "mantém como backup" acima), então
+  // usa o mínimo entre todas as entradas ativas; sem nenhuma ativa, usa o
+  // preço regular do anúncio. Mesmo valor em toda linha deste MLB.
+  const precosAtivos = entradasAtivas
+    .map((e) => e.promo.total_price_for_boosted_offer ?? e.promo.price ?? null)
+    .filter((p): p is number => p != null);
+  const precoAtualItem = precosAtivos.length > 0 ? Math.min(...precosAtivos) : detail.price ?? null;
+
   // Sem NENHUMA campanha dentro do piso estrito: procura a melhor opção
   // que caia dentro da TOLERÂNCIA configurada (todas as variações do item
   // acima do piso*[1-tolerância], não só a estrita) — vira uma
@@ -700,6 +711,7 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
       offer_id: e.promo.offer_id ?? null,
       preco_proposto: e.rejeitada && !ehTolerancia ? null : e.preco,
       preco_original: e.promo.original_price ?? null,
+      preco_atual: precoAtualItem,
       margem_calculada_pct: e.margemPct === -Infinity ? null : e.margemPct * 100,
       desconto_consumidor_pct: e.descontoPct * 100,
       ml_participacao_pct: e.mlPct != null ? e.mlPct * 100 : null,
