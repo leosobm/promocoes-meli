@@ -34,6 +34,14 @@ export interface CampaignTypeConfig {
   deleteRequiresOfferId: boolean;
   canDeleteAfterActive: boolean; // false = doc diz explicitamente que não dá pra remover depois de ativa
   sourceUrl: string;
+  // "mercado_livre": o ML cria/convida pra campanha e oferece os
+  // candidatos — o vendedor só aceita (mesmo quando ele próprio define o
+  // preço, caso de DEAL/LIGHTNING/DOD, priceMode "seller_defined").
+  // "vendedor": o vendedor cria a campanha do zero (SELLER_CAMPAIGN,
+  // SELLER_COUPON_CAMPAIGN) — usado pra priorizar campanha do ML sobre
+  // campanha própria quando as duas estão disponíveis (pedido do usuário
+  // em 2026-11-05: independe de ter redução de tarifa ou não).
+  origem: "mercado_livre" | "vendedor";
 }
 
 export const CAMPAIGN_TYPES: Record<string, CampaignTypeConfig> = {
@@ -45,6 +53,7 @@ export const CAMPAIGN_TYPES: Record<string, CampaignTypeConfig> = {
     requiresOfferId: false,
     deleteRequiresOfferId: false,
     canDeleteAfterActive: true,
+    origem: "mercado_livre",
     sourceUrl: "confirmado na prática (mercadolivre_adesao_campanhas.py)",
   },
   SELLER_CAMPAIGN: {
@@ -55,6 +64,7 @@ export const CAMPAIGN_TYPES: Record<string, CampaignTypeConfig> = {
     requiresOfferId: false,
     deleteRequiresOfferId: false,
     canDeleteAfterActive: true,
+    origem: "vendedor",
     sourceUrl: "confirmado na prática (mercadolivre_adesao_campanhas.py)",
   },
   MARKETPLACE_CAMPAIGN: {
@@ -65,6 +75,7 @@ export const CAMPAIGN_TYPES: Record<string, CampaignTypeConfig> = {
     requiresOfferId: false,
     deleteRequiresOfferId: false,
     canDeleteAfterActive: true,
+    origem: "mercado_livre",
     sourceUrl: "confirmado na prática (mercadolivre_adesao_campanhas.py)",
   },
   BANK: {
@@ -76,6 +87,7 @@ export const CAMPAIGN_TYPES: Record<string, CampaignTypeConfig> = {
     extraJoinFields: "percentages",
     deleteRequiresOfferId: false,
     canDeleteAfterActive: true,
+    origem: "mercado_livre",
     sourceUrl: "confirmado na prática (mercadolivre_adesao_campanhas.py)",
   },
   PRE_NEGOTIATED: {
@@ -86,6 +98,7 @@ export const CAMPAIGN_TYPES: Record<string, CampaignTypeConfig> = {
     requiresOfferId: true,
     deleteRequiresOfferId: true,
     canDeleteAfterActive: true,
+    origem: "mercado_livre",
     sourceUrl: "https://developers.mercadolibre.com.ar/en_us/pre-negotiated-discount-per-item",
   },
   VOLUME: {
@@ -96,6 +109,7 @@ export const CAMPAIGN_TYPES: Record<string, CampaignTypeConfig> = {
     requiresOfferId: false,
     deleteRequiresOfferId: false,
     canDeleteAfterActive: true,
+    origem: "mercado_livre",
     sourceUrl: "https://developers.mercadolibre.com.ar/en_us/volume-discount-campaigns",
   },
   LIGHTNING: {
@@ -108,6 +122,7 @@ export const CAMPAIGN_TYPES: Record<string, CampaignTypeConfig> = {
     stockBounds: "exclusive",
     deleteRequiresOfferId: false,
     canDeleteAfterActive: false, // doc: "Once activated, offers cannot be deleted" — só pausar o anúncio
+    origem: "mercado_livre",
     sourceUrl: "https://developers.mercadolibre.com.ar/en_us/lightning-deal",
   },
   SMART_LIGHTNING: {
@@ -120,6 +135,7 @@ export const CAMPAIGN_TYPES: Record<string, CampaignTypeConfig> = {
     stockBounds: "inclusive", // doc: "deve ser... entre stock.min e stock.max, inclusive"
     deleteRequiresOfferId: true,
     canDeleteAfterActive: false, // doc: só remove enquanto "pending" (antes de "started")
+    origem: "mercado_livre",
     sourceUrl: "https://developers.mercadolivre.com.br/pt_br/campanhas-smart-price-matching#Participar-de-SMART_LIGHTNING-com-o-estoque-escolhido",
   },
   DOD: {
@@ -130,6 +146,7 @@ export const CAMPAIGN_TYPES: Record<string, CampaignTypeConfig> = {
     requiresOfferId: false,
     deleteRequiresOfferId: false,
     canDeleteAfterActive: false, // mesma restrição do LIGHTNING
+    origem: "mercado_livre",
     sourceUrl: "https://developers.mercadolibre.com.ar/en_us/daily-deal",
   },
   SMART: {
@@ -140,6 +157,7 @@ export const CAMPAIGN_TYPES: Record<string, CampaignTypeConfig> = {
     requiresOfferId: true,
     deleteRequiresOfferId: true,
     canDeleteAfterActive: true,
+    origem: "mercado_livre",
     sourceUrl: "https://developers.mercadolibre.com.ar/en_us/smart-campaigns",
   },
   PRICE_MATCHING: {
@@ -150,6 +168,7 @@ export const CAMPAIGN_TYPES: Record<string, CampaignTypeConfig> = {
     requiresOfferId: true,
     deleteRequiresOfferId: true,
     canDeleteAfterActive: true,
+    origem: "mercado_livre",
     sourceUrl: "https://developers.mercadolibre.com.ar/en_us/smart-campaigns",
   },
   UNHEALTHY_STOCK: {
@@ -160,6 +179,7 @@ export const CAMPAIGN_TYPES: Record<string, CampaignTypeConfig> = {
     requiresOfferId: true,
     deleteRequiresOfferId: true,
     canDeleteAfterActive: true,
+    origem: "mercado_livre",
     sourceUrl: "https://developers.mercadolibre.com.ar/en_us/pre-negotiated-discount-per-item",
   },
   SELLER_COUPON_CAMPAIGN: {
@@ -168,6 +188,7 @@ export const CAMPAIGN_TYPES: Record<string, CampaignTypeConfig> = {
     writeSupported: true,
     priceMode: "no_price",
     requiresOfferId: false,
+    origem: "vendedor",
     deleteRequiresOfferId: false, // particularidade: DELETE não aceita offer_id neste tipo
     canDeleteAfterActive: true,
     sourceUrl: "https://developers.mercadolibre.com.bo/en_us/seller-coupon",
@@ -184,6 +205,7 @@ export function getCampaignTypeConfig(type: string): CampaignTypeConfig {
       requiresOfferId: false,
       deleteRequiresOfferId: false,
       canDeleteAfterActive: true,
+      origem: "mercado_livre", // tipo desconhecido — os dois tipos "vendedor" já estão mapeados acima
       sourceUrl: "tipo desconhecido — payload não confirmado, somente leitura",
     }
   );

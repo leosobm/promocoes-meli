@@ -519,13 +519,29 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
   // score mais alto (pesa só indiretamente, via ml_participacao_pct).
   const comReducaoDeTarifa = poolMelhor.filter((e) => estimarReducaoTarifa(e.promo) !== null);
 
+  // Regra de negócio: entre campanhas viáveis, uma criada pelo Mercado
+  // Livre (o vendedor só aceita um candidato que o ML já ofereceu — DEAL,
+  // SMART, LIGHTNING, SMART_LIGHTNING, BANK, PRE_NEGOTIATED,
+  // PRICE_MATCHING, UNHEALTHY_STOCK, MARKETPLACE_CAMPAIGN, VOLUME, DOD, ou
+  // mesmo quando o vendedor define o preço, como DEAL/LIGHTNING/DOD) deve
+  // ser priorizada sobre uma criada pelo próprio vendedor (SELLER_CAMPAIGN,
+  // SELLER_COUPON_CAMPAIGN) — independente de ter redução de tarifa ou
+  // não (pedido explícito do usuário). Como toda campanha com redução de
+  // tarifa já é do Mercado Livre, este conjunto inclui `comReducaoDeTarifa`
+  // inteiro e ainda cobre o caso sem redução nenhuma.
+  const criadasPeloMercadoLivre = poolMelhor.filter(
+    (e) => getCampaignTypeConfig(e.promo.promotion_type).origem === "mercado_livre",
+  );
+
   const melhor = preNegociadasViaveis.length > 0
     ? preNegociadasViaveis.reduce((best, cur) => (cur.score > best.score ? cur : best))
     : comReducaoDeTarifa.length > 0
       ? comReducaoDeTarifa.reduce((best, cur) => (cur.score > best.score ? cur : best))
-      : poolMelhor.length > 0
-        ? poolMelhor.reduce((best, cur) => (cur.score > best.score ? cur : best))
-        : null;
+      : criadasPeloMercadoLivre.length > 0
+        ? criadasPeloMercadoLivre.reduce((best, cur) => (cur.score > best.score ? cur : best))
+        : poolMelhor.length > 0
+          ? poolMelhor.reduce((best, cur) => (cur.score > best.score ? cur : best))
+          : null;
 
   // Resolução definitiva de qual campanha "ativa" comparar com `melhor`:
   // se a própria `melhor` já estiver entre as ativas (ex.: já foi aplicada
