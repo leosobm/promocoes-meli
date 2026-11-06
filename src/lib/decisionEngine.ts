@@ -620,7 +620,24 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
       // senão: preço vigente já está bom (seguro e pelo menos tão
       // atrativo quanto o calculado) — nenhuma ação, "Mantida" de verdade.
     } else {
-      if (cfgAtiva.canDeleteAfterActive) {
+      // Duas instâncias (promotion_id diferente) do MESMO tipo de
+      // campanha, com preço praticamente igual ao que já está ao vivo —
+      // visto em produção: a API às vezes tem mais de um candidato/ativa
+      // do mesmo tipo pro mesmo item (ex.: dois ciclos de DEAL se
+      // sobrepondo), e sem este corte o motor recomendava "sai de DEAL e
+      // entra em DEAL" com margem/desconto/score idênticos (diferença só
+      // de centavos de arredondamento) — uma troca que não muda nada na
+      // prática, só gasta uma chamada de leave+join à toa (com o risco
+      // comercial real de cada gravação) pra terminar no mesmo lugar.
+      const precoAoVivoOutraInstancia = ativaEntry.promo.total_price_for_boosted_offer ?? ativaEntry.promo.price ?? null;
+      const trocaIrrelevante =
+        ativaEntry.promo.promotion_type === melhor.promo.promotion_type &&
+        precoAoVivoOutraInstancia != null &&
+        Math.abs(melhor.preco - precoAoVivoOutraInstancia) <= 0.01;
+
+      if (trocaIrrelevante) {
+        recomendada = ativaEntry; // mesma modalidade, preço igual — não vale o risco de sair e reentrar
+      } else if (cfgAtiva.canDeleteAfterActive) {
         trocaFlag = true; // troca executável: sai da ativa, entra na nova
       } else if (ativaEntry.rejeitada === null) {
         // não dá pra sair da ativa (ex.: LIGHTNING/DOD) — mantém, mesmo a
