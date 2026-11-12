@@ -391,6 +391,19 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
         preco = promo.suggested_discounted_price;
       }
 
+      // Regra geral do ML (vista em produção em vários DEAL rejeitados com
+      // "MAXIMUM_DISCOUNT_PERCENT - Discount final Price must be less than
+      // 80 Percent of initial Price"): o preço final não pode representar
+      // um desconto >= 80% sobre original_price, mesmo quando
+      // min_discounted_price não cobre esse caso (ausente ou desatualizado
+      // em relação a essa regra). Usa 79% como piso (buffer de 1pp pra não
+      // cair exatamente na borda por arredondamento) — só sobe o preço,
+      // nunca desce, então só melhora a margem, nunca prejudica.
+      if (promo.original_price != null) {
+        const precoMinimoDesconto80 = promo.original_price * 0.21;
+        if (preco < precoMinimoDesconto80) preco = precoMinimoDesconto80;
+      }
+
       // Campanha já ATIVA (status ao vivo) e tipo onde o vendedor define o
       // preço: só recomenda MUDAR o preço vigente se (a) ele já não estiver
       // mais seguro (margem caiu abaixo do mínimo de alguma variação) ou
