@@ -11,7 +11,7 @@ interface ItemSelecionado {
 }
 
 export interface EstrategiaInitial {
-  id: string;
+  id?: string; // ausente = pré-preenchimento pra duplicar (sempre cria nova, nunca edita)
   nome: string;
   data_inicio: string;
   data_fim: string;
@@ -26,7 +26,7 @@ export interface EstrategiaInitial {
 
 export default function EstrategiaForm({ initial }: { initial?: EstrategiaInitial }) {
   const router = useRouter();
-  const editando = !!initial;
+  const editando = !!initial?.id;
 
   const [nome, setNome] = useState(initial?.nome ?? "");
   const [dataInicio, setDataInicio] = useState(initial?.data_inicio ?? "");

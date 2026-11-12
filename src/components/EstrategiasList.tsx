@@ -97,6 +97,9 @@ export default function EstrategiasList({ estrategias }: { estrategias: Estrateg
                   <Link href={`/estrategias/${e.id}`} className="text-xs font-medium text-neutral-600 hover:underline">
                     Editar
                   </Link>
+                  <Link href={`/estrategias/nova?duplicar=${e.id}`} className="text-xs font-medium text-neutral-600 hover:underline">
+                    Duplicar
+                  </Link>
                   <button
                     onClick={() => handleExcluir(e.id, e.nome)}
                     disabled={excluindo === e.id}
