@@ -6,6 +6,7 @@ import type {
   ItemDetail,
   ItemPromotion,
   JoinResult,
+  PriceToWin,
   PromotionType,
 } from "./types";
 import { getCampaignTypeConfig } from "./campaignTypes";
@@ -286,6 +287,14 @@ export class MercadoLivreClient {
       }
     }
     return out;
+  }
+
+  async getPriceToWin(itemId: string): Promise<{ ok: true; data: PriceToWin } | { ok: false; error: string }> {
+    const { status, data } = await this.request<PriceToWin>("GET", `/items/${itemId}/price_to_win`, {
+      params: { version: "v2" },
+    });
+    if (status !== 200) return { ok: false, error: `${status}: ${JSON.stringify(data).slice(0, 300)}` };
+    return { ok: true, data };
   }
 
   async getCommission(item: ItemDetail): Promise<CommissionResult> {

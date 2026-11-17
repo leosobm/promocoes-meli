@@ -18,7 +18,8 @@ interface StreamOutcome {
   done: { totalDecisions: number; totalEscolhidas: number } | null;
 }
 
-export default function UpdateButton() {
+export default function UpdateButton({ modo = "campanhas" }: { modo?: "campanhas" | "catalogo" }) {
+  const catalogo = modo === "catalogo";
   const router = useRouter();
   const [status, setStatus] = useState<Status>("idle");
   const [logs, setLogs] = useState<string[]>([]);
@@ -28,7 +29,7 @@ export default function UpdateButton() {
   const [apenasAtivos, setApenasAtivos] = useState(false);
 
   async function runOnce(runId?: string): Promise<StreamOutcome> {
-    const resp = await fetch("/api/atualizar", {
+    const resp = await fetch(catalogo ? "/api/catalogo/atualizar" : "/api/atualizar", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...(runId ? { runId } : {}), apenasAtivos }),
@@ -91,7 +92,9 @@ export default function UpdateButton() {
         }
         if (outcome.done) {
           setSummary(
-            `${outcome.done.totalDecisions} decisões calculadas — ${outcome.done.totalEscolhidas} campanha(s) escolhida(s) pra revisar.`,
+            catalogo
+              ? `${outcome.done.totalDecisions} anúncio(s) de catálogo analisado(s) — ${outcome.done.totalEscolhidas} não estão ganhando.`
+              : `${outcome.done.totalDecisions} decisões calculadas — ${outcome.done.totalEscolhidas} campanha(s) escolhida(s) pra revisar.`,
           );
           setStatus("concluido");
           router.refresh();
@@ -115,7 +118,7 @@ export default function UpdateButton() {
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-4 text-sm text-neutral-600">
+      <div className={`flex flex-wrap items-center gap-4 text-sm text-neutral-600 ${catalogo ? "hidden" : ""}`}>
         <label className="flex items-center gap-1.5">
           <input
             type="radio"
@@ -143,7 +146,7 @@ export default function UpdateButton() {
           disabled={status === "rodando"}
           className="rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-800 disabled:opacity-50"
         >
-          {status === "rodando" ? "Atualizando..." : "Atualizar agora"}
+          {status === "rodando" ? "Atualizando..." : catalogo ? "Analisar catálogo" : "Atualizar agora"}
         </button>
         <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-medium ${chip.className}`}>
           <span className={`h-2 w-2 rounded-full ${chip.dot}`} />

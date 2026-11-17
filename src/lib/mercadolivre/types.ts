@@ -67,6 +67,11 @@ export interface ItemDetail {
   category_id?: string;
   listing_type_id?: string;
   status?: string;
+  // true = anúncio de catálogo (disputa o buybox). Ter catalog_product_id
+  // sozinho não basta: anúncio tradicional vinculado a um produto também
+  // tem esse campo, mas não compete (visto na prática: 1355 casos assim).
+  catalog_listing?: boolean;
+  catalog_product_id?: string | null;
   shipping?: {
     logistic_type?: string;
     mode?: string;
@@ -94,6 +99,29 @@ export interface FreeShippingCostResult {
   list_cost?: number;
   method?: string;
   error?: string;
+}
+
+export interface CatalogBoost {
+  id: string;
+  status: string; // boosted | not_boosted | opportunity | not_apply
+  description?: string;
+}
+
+/** GET /items/{id}/price_to_win?version=v2 — `current_price` já é o preço
+ * promocional vigente (confirmado contra /sale_price), e `price_to_win` já
+ * desconta os boosts de cada lado (ex.: 43,75 pra vencer um concorrente a
+ * 39,90 porque o item tem envio no mesmo dia e o vencedor não). */
+export interface PriceToWin {
+  item_id: string;
+  current_price: number | null;
+  price_to_win: number | null;
+  status: string; // winning | competing | sharing_first_place | listed | not_listed
+  reason?: string[];
+  visit_share?: string | null;
+  competitors_sharing_first_place?: number | null;
+  catalog_product_id?: string | null;
+  boosts?: CatalogBoost[];
+  winner?: { item_id: string; price: number | null; boosts?: CatalogBoost[] } | null;
 }
 
 export interface JoinResult {

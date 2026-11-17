@@ -33,5 +33,20 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ ok: true, deletedCount: count ?? 0, retencaoDias: RETENCAO_DIAS, cutoff });
+  const { error: errCatalogo, count: countCatalogo } = await supabase
+    .from("catalog_decisions")
+    .delete({ count: "exact" })
+    .lt("created_at", cutoff);
+
+  if (errCatalogo) {
+    return NextResponse.json({ ok: false, error: errCatalogo.message }, { status: 500 });
+  }
+
+  return NextResponse.json({
+    ok: true,
+    deletedCount: count ?? 0,
+    deletedCatalogo: countCatalogo ?? 0,
+    retencaoDias: RETENCAO_DIAS,
+    cutoff,
+  });
 }

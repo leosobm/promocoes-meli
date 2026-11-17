@@ -6,6 +6,7 @@ import { createBrowserSupabase } from "@/lib/supabase/client";
 
 const LINKS = [
   { href: "/", label: "Painel", adminOnly: false },
+  { href: "/catalogo", label: "Catálogo", adminOnly: false },
   { href: "/itens", label: "Itens (custo/margem)", adminOnly: true },
   { href: "/estrategias", label: "Estratégias", adminOnly: true },
   { href: "/historico", label: "Histórico", adminOnly: false },

@@ -28,7 +28,7 @@ export type ProgressEvent =
 // devolve mais stock.min/max pra essa entrada (só remaining_stock),
 // gerando stock_sugerido nulo e uma segunda tentativa de join falhando
 // com "Stock must be greater than X and less than Y" (visto em produção).
-const ACTIVE_STATUSES = new Set(["accepted", "active", "started", "joined", "in_progress", "pending"]);
+export const ACTIVE_STATUSES = new Set(["accepted", "active", "started", "joined", "in_progress", "pending"]);
 
 // Quantos MLBs processar em paralelo — cada um faz ~4 chamadas à API do ML
 // (detalhe do item, comissão, frete grátis, promoções). Sequencial não cabe
@@ -160,7 +160,7 @@ interface TarifaReducaoEstimada {
  * quando presente (discount_meli_boost_amount); na ausência dele, estima
  * a partir de meli_percentage com o corte de segurança acima. Retorna
  * null quando não há nenhum sinal de redução (nem exato nem estimável). */
-function estimarReducaoTarifa(promo: ItemPromotion): TarifaReducaoEstimada | null {
+export function estimarReducaoTarifa(promo: ItemPromotion): TarifaReducaoEstimada | null {
   if (promo.discount_meli_boost_amount != null) {
     return {
       valor: promo.discount_meli_boost_amount,
@@ -219,6 +219,59 @@ function extractSku(item: ItemDetail): string | null {
   return fromVariation ?? null;
 }
 
+export function montarItemsCacheRow(mlb: string, detail: ItemDetail): Record<string, unknown> {
+  return {
+    mlb,
+    title: detail.title ?? null,
+    category_id: detail.category_id ?? null,
+    price: detail.price ?? null,
+    sku: extractSku(detail),
+    listing_type_id: detail.listing_type_id ?? null,
+    shipping: detail.shipping ?? null,
+    status: detail.status ?? null,
+    fetched_at: new Date().toISOString(),
+  };
+}
+
+/** Tipos com extraJoinFields "stock" exigem reservar um estoque no join —
+ * mas a faixa aceita varia por tipo (confirmado na doc oficial de cada
+ * um): LIGHTNING é ABERTA/exclusiva (min e max NÃO são aceitos, só o que
+ * fica estritamente entre eles — a mensagem de erro real é literal "Stock
+ * must be greater than X and less than Y", visto em produção: min=5
+ * rejeitou com stock=5, só aceitou a partir de 6). SMART_LIGHTNING é
+ * FECHADA/inclusiva (min e max são aceitos, doc: "deve ser um inteiro
+ * positivo entre stock.min e stock.max, inclusive"). Sempre reserva o
+ * mínimo utilizável pra cada faixa, não o estoque disponível inteiro —
+ * deixa o resto livre pra venda normal fora da oferta. */
+export function calcStockSugerido(
+  promo: ItemPromotion,
+  disponivel: number | null,
+): { stock: number | null; erro: string | null } {
+  const typeCfg = getCampaignTypeConfig(promo.promotion_type);
+  if (typeCfg.extraJoinFields !== "stock") return { stock: null, erro: null };
+  const min = promo.stock?.min ?? null;
+  const max = promo.stock?.max ?? null;
+  if (min == null || max == null || disponivel == null) return { stock: null, erro: null };
+  const inclusivo = typeCfg.stockBounds === "inclusive";
+  const minUtilizavel = inclusivo ? min : min + 1;
+  const faixaVazia = inclusivo ? minUtilizavel > max : minUtilizavel >= max;
+  if (faixaVazia) {
+    return {
+      stock: null,
+      erro: inclusivo
+        ? `Faixa de estoque da campanha (entre ${min} e ${max}, inclusive) está vazia (min maior que max).`
+        : `Faixa de estoque da campanha (entre ${min} e ${max}, exclusive) não deixa nenhum valor válido.`,
+    };
+  }
+  if (disponivel < minUtilizavel) {
+    return {
+      stock: null,
+      erro: `Estoque disponível do anúncio (${disponivel}) é menor que o mínimo utilizável pela campanha (${minUtilizavel}${inclusivo ? "" : `, já que ${min} não é aceito`}) — não é possível aderir.`,
+    };
+  }
+  return { stock: minUtilizavel, erro: null };
+}
+
 export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunContext): Promise<MlbResult> {
   const logs: string[] = [];
   const decisionRows: DecisionInsertRow[] = [];
@@ -241,17 +294,7 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
     return { decisionRows, itemsCacheRow: null, logs, escolhidas: 0 };
   }
 
-  const itemsCacheRow = {
-    mlb,
-    title: detail.title ?? null,
-    category_id: detail.category_id ?? null,
-    price: detail.price ?? null,
-    sku: extractSku(detail),
-    listing_type_id: detail.listing_type_id ?? null,
-    shipping: detail.shipping ?? null,
-    status: detail.status ?? null,
-    fetched_at: new Date().toISOString(),
-  };
+  const itemsCacheRow = montarItemsCacheRow(mlb, detail);
 
   for (const row of rows) {
     if (!row.sku) continue;
@@ -310,38 +353,10 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
     const descontoTarifaValor = tarifaEstimada?.valor ?? 0;
     const priceCtx = { freteMedio, taxasPct: ctx.taxasPct, comissaoPct, descontoTarifaPct: descontoTarifaPctFrac };
 
-    // Tipos com extraJoinFields "stock" exigem reservar um estoque no
-    // join — mas a faixa aceita varia por tipo (confirmado na doc oficial
-    // de cada um): LIGHTNING é ABERTA/exclusiva (min e max NÃO são
-    // aceitos, só o que fica estritamente entre eles — a mensagem de erro
-    // real é literal "Stock must be greater than X and less than Y", visto
-    // em produção: min=5 rejeitou com stock=5, só aceitou a partir de 6).
-    // SMART_LIGHTNING é FECHADA/inclusiva (min e max são aceitos, doc:
-    // "deve ser um inteiro positivo entre stock.min e stock.max,
-    // inclusive"). Sempre reserva o mínimo utilizável pra cada faixa, não
-    // o estoque disponível inteiro — deixa o resto livre pra venda normal
-    // fora da oferta.
-    let stockSugerido: number | null = null;
-    let estoqueInsuficiente: string | null = null;
-    if (typeCfg.extraJoinFields === "stock") {
-      const min = promo.stock?.min ?? null;
-      const max = promo.stock?.max ?? null;
-      const disponivel = detail.available_quantity ?? null;
-      const inclusivo = typeCfg.stockBounds === "inclusive";
-      if (min != null && max != null && disponivel != null) {
-        const minUtilizavel = inclusivo ? min : min + 1;
-        const faixaVazia = inclusivo ? minUtilizavel > max : minUtilizavel >= max;
-        if (faixaVazia) {
-          estoqueInsuficiente = inclusivo
-            ? `Faixa de estoque da campanha (entre ${min} e ${max}, inclusive) está vazia (min maior que max).`
-            : `Faixa de estoque da campanha (entre ${min} e ${max}, exclusive) não deixa nenhum valor válido.`;
-        } else if (disponivel < minUtilizavel) {
-          estoqueInsuficiente = `Estoque disponível do anúncio (${disponivel}) é menor que o mínimo utilizável pela campanha (${minUtilizavel}${inclusivo ? "" : `, já que ${min} não é aceito`}) — não é possível aderir.`;
-        } else {
-          stockSugerido = minUtilizavel;
-        }
-      }
-    }
+    const { stock: stockSugerido, erro: estoqueInsuficiente } = calcStockSugerido(
+      promo,
+      detail.available_quantity ?? null,
+    );
     if (estoqueInsuficiente) {
       evaluated.push({
         promo, preco: 0, margemPct: -Infinity, margemAoVivoPct: null, skuReferencia: null, descontoPct: 0,
@@ -801,13 +816,21 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
 // nenhum aviso).
 const TIME_BUDGET_MS = 45_000;
 
-export async function* runUpdate(
-  resumeRunId?: string,
-  apenasAtivos?: boolean,
-): AsyncGenerator<ProgressEvent> {
-  const startedAt = Date.now();
-  const supabase = createServiceSupabase();
+type ServiceSupabase = ReturnType<typeof createServiceSupabase>;
 
+export interface Universo {
+  weights: ScoreWeights;
+  taxasPct: number;
+  byMlb: Map<string, ItemConfigRow[]>;
+  totalLinhas: number;
+}
+
+/** item_config (participar_campanhas=true) com margens já resolvidas pela
+ * cascata, agrupado por MLB — mesmo universo pro motor de campanhas e pro
+ * de catálogo. */
+export async function carregarUniverso(
+  supabase: ServiceSupabase,
+): Promise<{ universo: Universo; erro: null } | { universo: null; erro: string }> {
   const { data: settingsRow } = await supabase
     .from("app_settings")
     .select("taxas_pct, peso_desconto_pct, peso_ml_pct, peso_margem_pct, margem_tolerancia_pct, margem_minima_pct, margem_alvo_pct, margem_teto_pct")
@@ -898,10 +921,7 @@ export async function* runUpdate(
       .order("mlb", { ascending: true })
       .order("sku", { ascending: true })
       .range(from, from + 999);
-    if (icErr) {
-      yield { type: "error", message: `Falha ao ler item_config: ${icErr.message}` };
-      return;
-    }
+    if (icErr) return { universo: null, erro: `Falha ao ler item_config: ${icErr.message}` };
     if (!page || page.length === 0) break;
     // Cascata de 5 níveis pra margem mínima/alvo e tolerância: estratégia
     // por item (ativa hoje) > estratégia por curva (ativa hoje) > valor do
@@ -943,8 +963,7 @@ export async function* runUpdate(
     if (page.length < 1000) break;
   }
   if (allRows.length === 0) {
-    yield { type: "error", message: "Nenhum item cadastrado em item_config (ou todos com participar_campanhas=false)." };
-    return;
+    return { universo: null, erro: "Nenhum item cadastrado em item_config (ou todos com participar_campanhas=false)." };
   }
 
   const byMlb = new Map<string, ItemConfigRow[]>();
@@ -952,25 +971,50 @@ export async function* runUpdate(
     if (!byMlb.has(row.mlb)) byMlb.set(row.mlb, []);
     byMlb.get(row.mlb)!.push(row);
   }
+  return { universo: { weights, taxasPct, byMlb, totalLinhas: allRows.length }, erro: null };
+}
 
-  // "Apenas itens ativos" = anúncio com status "active" no Mercado Livre
-  // (não pausado/fechado) — usa o cache de rodadas anteriores
-  // (items_cache.status) em vez de consultar a API antes de decidir o que
-  // processar. Itens nunca sincronizados (sem linha em items_cache) ficam
-  // de fora desse filtro — rode "todos" pelo menos uma vez pra populá-los.
+/** "Ativo" = anúncio com status "active" no Mercado Livre (não
+ * pausado/fechado) — usa o cache de rodadas anteriores (items_cache.status)
+ * em vez de consultar a API antes de decidir o que processar. Itens nunca
+ * sincronizados (sem linha em items_cache) ficam de fora — rode "todos"
+ * pelo menos uma vez pra populá-los. */
+export async function mlbsAtivosNoCache(supabase: ServiceSupabase, mlbs: string[]): Promise<Set<string>> {
+  // .in() vai na URL — com blocos de 1000 MLBs a requisição estourava o
+  // limite e falhava SEM erro visível (data null): só 122 de 743 ativos
+  // eram encontrados (visto em 2026-11-17). Blocos de 150 = mesmo tamanho
+  // já usado em /api/aplicar.
+  const ativos = new Set<string>();
+  for (let i = 0; i < mlbs.length; i += 150) {
+    const bloco = mlbs.slice(i, i + 150);
+    const { data: page, error } = await supabase
+      .from("items_cache")
+      .select("mlb, status")
+      .in("mlb", bloco)
+      .eq("status", "active");
+    if (error) throw new Error(`Falha ao ler items_cache (filtro de ativos): ${error.message}`);
+    for (const it of page ?? []) ativos.add(it.mlb);
+  }
+  return ativos;
+}
+
+export async function* runUpdate(
+  resumeRunId?: string,
+  apenasAtivos?: boolean,
+): AsyncGenerator<ProgressEvent> {
+  const startedAt = Date.now();
+  const supabase = createServiceSupabase();
+
+  const carregado = await carregarUniverso(supabase);
+  if (carregado.erro !== null) {
+    yield { type: "error", message: carregado.erro };
+    return;
+  }
+  const { weights, taxasPct, byMlb, totalLinhas } = carregado.universo;
+
   if (apenasAtivos) {
-    const todosMlbs = [...byMlb.keys()];
-    const ativos = new Set<string>();
-    for (let i = 0; i < todosMlbs.length; i += 1000) {
-      const bloco = todosMlbs.slice(i, i + 1000);
-      const { data: page } = await supabase
-        .from("items_cache")
-        .select("mlb, status")
-        .in("mlb", bloco)
-        .eq("status", "active");
-      for (const it of page ?? []) ativos.add(it.mlb);
-    }
-    for (const mlb of todosMlbs) {
+    const ativos = await mlbsAtivosNoCache(supabase, [...byMlb.keys()]);
+    for (const mlb of [...byMlb.keys()]) {
       if (!ativos.has(mlb)) byMlb.delete(mlb);
     }
   }
@@ -1011,7 +1055,7 @@ export async function* runUpdate(
   if (!resumeRunId) {
     yield {
       type: "log",
-      message: `${totalMlbs} MLBs configurados (${allRows.length} linhas / variações no total). Conectando ao Mercado Livre...`,
+      message: `${totalMlbs} MLBs configurados (${totalLinhas} linhas / variações no total). Conectando ao Mercado Livre...`,
     };
   }
   const client = await MercadoLivreClient.fromStore();

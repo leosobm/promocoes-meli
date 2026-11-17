@@ -45,6 +45,19 @@ export function calcMargemResultante(inputs: {
   return lucro / preco;
 }
 
+/** Maior preço <= `preco` terminado em ,90 ou ,49 (regra de precificação
+ * do usuário: sempre arredonda PARA BAIXO, mesmo que a margem fique abaixo
+ * da meta por causa disso). Em centavos inteiros pra não errar por ponto
+ * flutuante (34.34 * 100 = 3433.9999...). null se não sobrar preço > 0. */
+export function arredondarPrecoPsicologico(preco: number): number | null {
+  const centavos = Math.floor(preco * 100 + 1e-6);
+  const reais = Math.floor(centavos / 100);
+  for (const candidato of [reais * 100 + 90, reais * 100 + 49, (reais - 1) * 100 + 90]) {
+    if (candidato > 0 && candidato <= centavos) return candidato / 100;
+  }
+  return null;
+}
+
 export function calcDescontoConsumidorPct(precoOriginal: number, precoFinal: number): number {
   if (!precoOriginal || precoOriginal <= 0) return 0;
   return (precoOriginal - precoFinal) / precoOriginal;
