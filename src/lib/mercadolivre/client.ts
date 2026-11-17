@@ -340,15 +340,19 @@ export class MercadoLivreClient {
    * forçar free_shipping=True quando o item não oferece frete grátis de
    * verdade. Pra item que já tem free_shipping=true, os dois cenários
    * batem (testado), então não há regressão em usar sempre o valor real.
+   *
+   * `itemPrice`: o custo muda por faixa de preço (visto: R$ 8,25 sem
+   * item_price contra R$ 6,95 a R$ 47,32, no mesmo anúncio) — passar o
+   * preço FINAL da oferta sendo avaliada, não o preço atual do anúncio.
    */
-  async getFreeShippingCost(userId: number, item: ItemDetail): Promise<FreeShippingCostResult> {
+  async getFreeShippingCost(userId: number, item: ItemDetail, itemPrice?: number): Promise<FreeShippingCostResult> {
     const freteGratisReal = item.shipping?.free_shipping ? "True" : "False";
     const modoLabel = item.shipping?.free_shipping ? "frete grátis" : "frete pago pelo comprador";
 
     const { status, data } = await this.request<{
       coverage?: { all_country?: { list_cost?: number } };
     }>("GET", `/users/${userId}/shipping_options/free`, {
-      params: { item_id: item.id, free_shipping: freteGratisReal, verbose: "true" },
+      params: { item_id: item.id, free_shipping: freteGratisReal, verbose: "true", item_price: itemPrice },
     });
     const coverage = data?.coverage?.all_country;
     if (status === 200 && coverage) {
@@ -364,7 +368,7 @@ export class MercadoLivreClient {
     }>("GET", `/users/${userId}/shipping_options/free`, {
       params: {
         dimensions: dims,
-        item_price: item.price,
+        item_price: itemPrice ?? item.price,
         free_shipping: freteGratisReal,
         verbose: "true",
         category_id: item.category_id,

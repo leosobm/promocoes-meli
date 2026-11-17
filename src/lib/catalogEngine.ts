@@ -9,6 +9,7 @@ import {
   ACTIVE_STATUSES,
   calcStockSugerido,
   carregarUniverso,
+  criarFretePorPreco,
   estimarReducaoTarifa,
   mlbsAtivosNoCache,
   montarItemsCacheRow,
@@ -201,16 +202,18 @@ export async function processCatalogMlb(
     };
   }
   const comissaoPct = commission.percentage_fee / 100;
-  const freteMedio = freeShipping.ok ? freeShipping.list_cost ?? 0 : 0;
-  const margemDe = (row: ItemConfigRow, preco: number, tarifaValor: number) =>
-    calcMargemResultante({ preco, cmv: row.cmv, freteMedio, comissaoPct, taxasPct: ctx.taxasPct, descontoTarifaValor: tarifaValor });
+  const freteNoPreco = criarFretePorPreco(ctx, detail, freeShipping.ok ? freeShipping.list_cost ?? 0 : 0);
+  const margemDe = async (row: ItemConfigRow, preco: number, tarifaValor: number) =>
+    calcMargemResultante({
+      preco, cmv: row.cmv, freteMedio: await freteNoPreco(preco), comissaoPct, taxasPct: ctx.taxasPct, descontoTarifaValor: tarifaValor,
+    });
 
   // Cada R$ de redução de tarifa vira R$ de lucro 1:1 (calcMargemResultante),
   // então o que falta pra margem mínima é (mínima − margem) × preço. Com
   // várias variações, vale a que precisa de mais incentivo.
   let ref: { row: ItemConfigRow; margem: number; incentivo: number } | null = null;
   for (const row of rows) {
-    const margem = margemDe(row, precoSugerido, 0);
+    const margem = await margemDe(row, precoSugerido, 0);
     const incentivo = Math.max(0, (row.margem_minima_pct / 100 - margem) * precoSugerido);
     if (!ref || incentivo > ref.incentivo || (incentivo === ref.incentivo && margem < ref.margem)) {
       ref = { row, margem, incentivo };
@@ -299,7 +302,7 @@ export async function processCatalogMlb(
     let pior = Infinity;
     let atingeMinimo = true;
     for (const row of rows) {
-      const m = margemDe(row, preco, tarifa?.valor ?? 0);
+      const m = await margemDe(row, preco, tarifa?.valor ?? 0);
       if (m < pior) pior = m;
       if (m < row.margem_minima_pct / 100) atingeMinimo = false;
     }

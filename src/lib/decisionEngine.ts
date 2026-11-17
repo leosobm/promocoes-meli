@@ -137,18 +137,15 @@ function extractMlParticipacao(p: ItemPromotion): { pct: number | null; fonte: s
   return { pct: null, fonte: null };
 }
 
-// Corte de segurança aplicado sobre o VALOR estimado de redução de tarifa
-// (não sobre o percentual meli_percentage em si) ao estimar sem
-// confirmação da API — ver chamado aberto com o suporte do Mercado Livre:
-// boosted_offer/discount_meli_boost_amount não aparecem de forma
-// confiável nem em ofertas já ativas, mas o painel mostra um valor de
-// redução real desde antes da adesão. Testamos meli_percentage × preço
-// original contra o painel em 9 casos reais: bateu exato em 2, ficou a
-// poucos centavos em 6, e errou por R$0,32 em 1 (desvio de ~12%, o pior
-// caso observado). Um corte de 1.5% sobre o valor NÃO cobre esse pior
-// caso (ainda superestimaria por ~10% nele) — decisão consciente de
-// aceitar esse risco residual em troca de mais precisão nos demais casos.
-const GORDURA_VALOR_FRAC = 0.015;
+// A redução de tarifa é um valor fixo em R$ por unidade; meli_percentage é
+// esse valor ÷ preço DE, arredondado a 1 casa decimal (conferido em
+// 2026-11-17 contra o painel da Central de Promoções e contra sale_fee de
+// pedidos reais). O valor real fica então entre (meli% ± 0,05) × DE — usar
+// o limite de baixo garante, por construção, nunca superestimar o
+// incentivo. Substitui o antigo corte fixo de 1,5% sobre o valor, que não
+// cobria percentuais pequenos (o erro de R$ 0,32 já visto era exatamente
+// esse arredondamento).
+const MEIA_CASA_ARREDONDAMENTO_PCT = 0.05;
 
 interface TarifaReducaoEstimada {
   valor: number;
@@ -158,7 +155,7 @@ interface TarifaReducaoEstimada {
 
 /** Redução de tarifa (comissão) de uma oferta: usa o valor exato da API
  * quando presente (discount_meli_boost_amount); na ausência dele, estima
- * a partir de meli_percentage com o corte de segurança acima. Retorna
+ * a partir de meli_percentage pelo limite de baixo do arredondamento. Retorna
  * null quando não há nenhum sinal de redução (nem exato nem estimável). */
 export function estimarReducaoTarifa(promo: ItemPromotion): TarifaReducaoEstimada | null {
   if (promo.discount_meli_boost_amount != null) {
@@ -170,8 +167,7 @@ export function estimarReducaoTarifa(promo: ItemPromotion): TarifaReducaoEstimad
   }
   const meliPct = promo.meli_percentage ?? promo.benefits?.meli_percent ?? null;
   if (meliPct == null || promo.original_price == null) return null;
-  const valorBruto = (meliPct / 100) * promo.original_price;
-  const valor = valorBruto * (1 - GORDURA_VALOR_FRAC);
+  const valor = Math.max(0, ((meliPct - MEIA_CASA_ARREDONDAMENTO_PCT) / 100) * promo.original_price);
   return {
     valor,
     pctFrac: valor / promo.original_price,
@@ -184,7 +180,7 @@ export function estimarReducaoTarifa(promo: ItemPromotion): TarifaReducaoEstimad
  * tenta a margem mínima como segunda tentativa antes de desistir). */
 function precoNecessarioParaRow(
   row: ItemConfigRow,
-  ctx: { freteMedio: number; taxasPct: number; comissaoPct: number; descontoTarifaPct: number },
+  ctx: { freteMedio: number; taxasPct: number; comissaoPct: number; descontoTarifaValor: number },
 ): { preco: number; erro: null } | { preco: null; erro: string } {
   const alvoFrac = (row.margem_alvo_pct ?? row.margem_minima_pct) / 100;
   try {
@@ -217,6 +213,29 @@ function extractSku(item: ItemDetail): string | null {
   if (fromItem) return fromItem;
   const fromVariation = item.variations?.[0]?.attributes?.find((a) => a.id === "SELLER_SKU")?.value_name;
   return fromVariation ?? null;
+}
+
+/** Frete do vendedor no preço FINAL de cada oferta — o custo muda por
+ * faixa de preço, então o frete do preço atual do anúncio não serve pra
+ * avaliar uma oferta em outro preço. Memorizado por item (ofertas costumam
+ * repetir preço); falha na consulta cai no frete do preço atual. */
+export function criarFretePorPreco(
+  ctx: { client: MercadoLivreClient; userId: number },
+  detail: ItemDetail,
+  freteBase: number,
+): (preco: number) => Promise<number> {
+  const cache = new Map<number, Promise<number>>();
+  return (preco) => {
+    const centavos = Math.round(preco * 100);
+    let frete = cache.get(centavos);
+    if (!frete) {
+      frete = ctx.client
+        .getFreeShippingCost(ctx.userId, detail, centavos / 100)
+        .then((r) => (r.ok ? r.list_cost ?? freteBase : freteBase));
+      cache.set(centavos, frete);
+    }
+    return frete;
+  };
 }
 
 export function montarItemsCacheRow(mlb: string, detail: ItemDetail): Record<string, unknown> {
@@ -319,7 +338,8 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
     return { decisionRows, itemsCacheRow, logs, escolhidas: 0 };
   }
   const comissaoPct = commission.percentage_fee / 100;
-  const freteMedio = freeShipping.ok ? freeShipping.list_cost ?? 0 : 0;
+  const freteBase = freeShipping.ok ? freeShipping.list_cost ?? 0 : 0;
+  const freteNoPreco = criarFretePorPreco(ctx, detail, freteBase);
 
   if (promotions.length === 0) {
     decisionRows.push({
@@ -349,9 +369,20 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
     const typeCfg = getCampaignTypeConfig(promo.promotion_type);
     const { pct: mlPct, fonte: mlFonte } = extractMlParticipacao(promo);
     const tarifaEstimada = estimarReducaoTarifa(promo);
-    const descontoTarifaPctFrac = tarifaEstimada?.pctFrac ?? 0;
     const descontoTarifaValor = tarifaEstimada?.valor ?? 0;
-    const priceCtx = { freteMedio, taxasPct: ctx.taxasPct, comissaoPct, descontoTarifaPct: descontoTarifaPctFrac };
+
+    // BANK é campanha de pagamento (desconto no Pix): soma POR CIMA da
+    // oferta de preço vigente, não a substitui (conferido em pedidos reais
+    // em 2026-11-17). Compará-la com DEAL/SMART/etc. podia recomendar
+    // "sai de DEAL e entra em BANK" — fica fora da disputa.
+    if (promo.promotion_type === "BANK") {
+      evaluated.push({
+        promo, preco: 0, margemPct: -Infinity, margemAoVivoPct: null, skuReferencia: null, descontoPct: 0,
+        mlPct, mlFonte, score: 0, variacoes: null, stockSugerido: null,
+        rejeitada: "Campanha de pagamento (Pix): soma por cima da oferta de preço vigente, não a substitui — fora da comparação com as ofertas de preço.",
+      });
+      continue;
+    }
 
     const { stock: stockSugerido, erro: estoqueInsuficiente } = calcStockSugerido(
       promo,
@@ -369,25 +400,36 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
     let margemAoVivoPct: number | null = null;
 
     if (typeCfg.priceMode === "seller_defined") {
-      let maiorPreco = -Infinity;
-      let erroImpossivel: string | null = null;
-      for (const row of rows) {
-        const r = precoNecessarioParaRow(row, priceCtx);
-        if (r.erro !== null) {
-          erroImpossivel = `${rowLabel(row)}: ${r.erro}`;
-          break;
+      const precoNecessario = (frete: number): { preco: number; erro: null } | { preco: null; erro: string } => {
+        const priceCtx = { freteMedio: frete, taxasPct: ctx.taxasPct, comissaoPct, descontoTarifaValor };
+        let maior = -Infinity;
+        for (const row of rows) {
+          const r = precoNecessarioParaRow(row, priceCtx);
+          if (r.erro !== null) return { preco: null, erro: `${rowLabel(row)}: ${r.erro}` };
+          if (r.preco > maior) maior = r.preco;
         }
-        const precoRow: number = r.preco;
-        if (precoRow > maiorPreco) maiorPreco = precoRow;
+        return { preco: maior, erro: null };
+      };
+      // O frete depende do preço e o preço necessário depende do frete —
+      // só muda ao cruzar uma faixa, então converge em 1-2 rodadas. Se não
+      // convergir (preço na borda de faixa), a checagem de margem mais
+      // abaixo usa o frete real do preço final de qualquer jeito.
+      let freteCalc = freteBase;
+      let necessario = precoNecessario(freteCalc);
+      for (let i = 0; i < 3 && necessario.erro === null; i++) {
+        const f = await freteNoPreco(necessario.preco);
+        if (Math.abs(f - freteCalc) < 0.005) break;
+        freteCalc = f;
+        necessario = precoNecessario(freteCalc);
       }
-      if (erroImpossivel) {
+      if (necessario.erro !== null) {
         evaluated.push({
           promo, preco: 0, margemPct: -Infinity, margemAoVivoPct: null, skuReferencia: null, descontoPct: 0,
-          mlPct, mlFonte, score: 0, rejeitada: erroImpossivel, variacoes: null, stockSugerido,
+          mlPct, mlFonte, score: 0, rejeitada: necessario.erro, variacoes: null, stockSugerido,
         });
         continue;
       }
-      preco = maiorPreco;
+      preco = necessario.preco;
       if (promo.min_discounted_price != null && preco < promo.min_discounted_price) preco = promo.min_discounted_price;
       if (promo.max_discounted_price != null && preco > promo.max_discounted_price) preco = promo.max_discounted_price;
 
@@ -430,9 +472,10 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
         if (precoAoVivo != null) {
           let piorAoVivo = Infinity;
           let aoVivoSeguro = true;
+          const freteAoVivo = await freteNoPreco(precoAoVivo);
           for (const row of rows) {
             const m = calcMargemResultante({
-              preco: precoAoVivo, cmv: row.cmv, freteMedio, comissaoPct,
+              preco: precoAoVivo, cmv: row.cmv, freteMedio: freteAoVivo, comissaoPct,
               taxasPct: ctx.taxasPct, descontoTarifaValor: tarifaEstimada?.valor ?? 0,
             });
             if (m < piorAoVivo) piorAoVivo = m;
@@ -462,9 +505,10 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
     const variacoes: VariacaoResultado[] = [];
     let pior: { row: ItemConfigRow; margemFrac: number } | null = null;
     let rejeitadaPorRow: string | null = null;
+    const freteFinal = await freteNoPreco(preco);
     for (const row of rows) {
       const margemFrac = calcMargemResultante({
-        preco, cmv: row.cmv, freteMedio, comissaoPct, taxasPct: ctx.taxasPct, descontoTarifaValor,
+        preco, cmv: row.cmv, freteMedio: freteFinal, comissaoPct, taxasPct: ctx.taxasPct, descontoTarifaValor,
       });
       variacoes.push({ sku: row.sku || null, cmv: row.cmv, margem_calculada_pct: margemFrac * 100 });
       if (!pior || margemFrac < pior.margemFrac) pior = { row, margemFrac };
@@ -511,7 +555,11 @@ export async function processMlb(mlb: string, rows: ItemConfigRow[], ctx: RunCon
   // negócio abaixo (bloqueio de troca pra SELLER_CAMPAIGN e priorização de
   // PRE_NEGOTIATED); a resolução definitiva (usada pra decidir troca de
   // verdade) vem depois de calcular `melhor`, abaixo.
-  const entradasAtivas = evaluated.filter((e) => ACTIVE_STATUSES.has((e.promo.status ?? "").toLowerCase()));
+  // BANK ativa não é a oferta de preço vigente (soma por cima dela) — não
+  // entra como "campanha atual" nem no preço atual do item.
+  const entradasAtivas = evaluated.filter(
+    (e) => e.promo.promotion_type !== "BANK" && ACTIVE_STATUSES.has((e.promo.status ?? "").toLowerCase()),
+  );
   const ativaEntryPreliminar = entradasAtivas[0] ?? null;
 
   // Regra de negócio: só recomenda TROCAR de campanha pra SELLER_CAMPAIGN

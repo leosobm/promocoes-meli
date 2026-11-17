@@ -11,20 +11,24 @@ export interface PricingInputs {
   freteMedio: number;
   taxasPct: number; // fração
   comissaoPct: number; // fração (percentage_fee do listing_prices)
-  descontoTarifaPct: number; // fração — discount_meli_boosted_percentage, ou 0
+  descontoTarifaValor: number; // R$ por unidade (redução de tarifa do ML), ou 0
 }
 
 /** Calculadora de Preço: dado uma margem-alvo, calcula o preço de venda.
- * PREÇO = (CMV + Frete_Médio) / (1 - (Taxas + Comissão + Margem_alvo - Desconto_tarifa_%)) */
+ * Inversa exata de calcMargemResultante, com a redução de tarifa em R$:
+ * PREÇO = (CMV + Frete − Redução_R$) / (1 − (Taxas + Comissão + Margem_alvo)).
+ * A redução é um valor fixo por unidade; o % que a API devolve é sobre o
+ * preço DE, então subtraí-lo como se fosse % do preço final (como era
+ * antes) superestimava o preço necessário. */
 export function calcPrecoParaMargem(inputs: PricingInputs & { margemAlvoPct: number }): number {
-  const { cmv, freteMedio, taxasPct, comissaoPct, margemAlvoPct, descontoTarifaPct } = inputs;
-  const denominador = 1 - (taxasPct + comissaoPct + margemAlvoPct - descontoTarifaPct);
+  const { cmv, freteMedio, taxasPct, comissaoPct, margemAlvoPct, descontoTarifaValor } = inputs;
+  const denominador = 1 - (taxasPct + comissaoPct + margemAlvoPct);
   if (denominador <= 0) {
     throw new Error(
       "Denominador <= 0 na fórmula de preço (taxas+comissão+margem alvo muito altos) — não é possível calcular um preço válido.",
     );
   }
-  return (cmv + freteMedio) / denominador;
+  return (cmv + freteMedio - descontoTarifaValor) / denominador;
 }
 
 /** Calculadora de Margem: dado um preço real, calcula a margem resultante.
