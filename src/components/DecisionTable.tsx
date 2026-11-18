@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { fmtGmv, fmtShare } from "@/lib/gmvFormat";
 
 export interface DecisionRow {
   id: string;
@@ -32,6 +33,8 @@ export interface DecisionRow {
   created_at: string;
   title: string | null;
   sku: string | null;
+  gmv_30d: number | null; // R$ vendidos nos últimos 30 dias (null = foto de GMV nunca calculada)
+  share_gmv_pct: number | null; // % do GMV total da conta no período
 }
 
 const RECOMENDACAO_LABEL: Record<string, string> = {
@@ -62,7 +65,7 @@ function average(nums: number[]): number | null {
   return valid.reduce((a, b) => a + b, 0) / valid.length;
 }
 
-type SortField = "mlb" | "margem" | "score" | "preco" | "precoAtual" | "desconto";
+type SortField = "mlb" | "margem" | "score" | "preco" | "precoAtual" | "desconto" | "share";
 type SortDir = "asc" | "desc";
 
 const PAGE_SIZE = 50;
@@ -114,6 +117,7 @@ export default function DecisionTable({
   const [margemMax, setMargemMax] = useState("");
   const [scoreMin, setScoreMin] = useState("");
   const [scoreMax, setScoreMax] = useState("");
+  const [shareMin, setShareMin] = useState("");
   const [sortField, setSortField] = useState<SortField>("score");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [page, setPage] = useState(1);
@@ -148,9 +152,10 @@ export default function DecisionTable({
       if (margemMax && (r.margem_calculada_pct ?? Infinity) > Number(margemMax)) return false;
       if (scoreMin && (r.score ?? -Infinity) < Number(scoreMin)) return false;
       if (scoreMax && (r.score ?? Infinity) > Number(scoreMax)) return false;
+      if (shareMin && (r.share_gmv_pct ?? -Infinity) < Number(shareMin.replace(",", "."))) return false;
       return true;
     });
-  }, [rows, busca, recFiltro, tipoFiltro, soIncentivoMl, margemMin, margemMax, scoreMin, scoreMax]);
+  }, [rows, busca, recFiltro, tipoFiltro, soIncentivoMl, margemMin, margemMax, scoreMin, scoreMax, shareMin]);
 
   const sorted = useMemo(() => {
     const arr = [...filtered];
@@ -161,6 +166,7 @@ export default function DecisionTable({
         case "preco": return r.preco_proposto ?? -Infinity;
         case "precoAtual": return r.preco_atual ?? -Infinity;
         case "desconto": return r.desconto_consumidor_pct ?? -Infinity;
+        case "share": return r.share_gmv_pct ?? -Infinity;
         default: return r.mlb;
       }
     };
@@ -226,6 +232,10 @@ export default function DecisionTable({
   const needsReinforcedConfirm = selectedRows.length > BATCH_CONFIRM_THRESHOLD;
   const avgMargem = average(selectedRows.map((r) => r.margem_calculada_pct ?? NaN));
   const avgDesconto = average(selectedRows.map((r) => r.desconto_consumidor_pct ?? NaN));
+  // Uma decisão por MLB nesta tela, então somar não conta o mesmo anúncio duas vezes.
+  const shareSelecionados = selectedRows.some((r) => r.share_gmv_pct != null)
+    ? selectedRows.reduce((s, r) => s + (r.share_gmv_pct ?? 0), 0)
+    : null;
   const comAnterior = selectedRows.filter((r) => r.campanha_anterior_margem_pct != null);
   const avgDeltaMargem = comAnterior.length
     ? average(comAnterior.map((r) => (r.margem_calculada_pct ?? 0) - (r.campanha_anterior_margem_pct ?? 0)))
@@ -329,6 +339,12 @@ export default function DecisionTable({
             <input value={scoreMax} onChange={(e) => { setScoreMax(e.target.value); setPage(1); }} type="number" className="w-20 rounded-md border border-neutral-300 px-2 py-1.5 text-sm" />
           </div>
         </div>
+        <div className="space-y-1">
+          <label className="block text-xs text-neutral-500" title="Participação do anúncio no GMV total da conta nos últimos 30 dias">
+            Share GMV 30d mín. %
+          </label>
+          <input value={shareMin} onChange={(e) => { setShareMin(e.target.value); setPage(1); }} inputMode="decimal" className="w-20 rounded-md border border-neutral-300 px-2 py-1.5 text-sm" />
+        </div>
         <label className="flex items-center gap-2 pb-1.5 text-sm text-neutral-600">
           <input type="checkbox" checked={soIncentivoMl} onChange={(e) => { setSoIncentivoMl(e.target.checked); setPage(1); }} />
           Só com incentivo do ML
@@ -382,6 +398,7 @@ export default function DecisionTable({
                 <input type="checkbox" checked={allFilteredSelected} onChange={selectAllFiltered} />
               </th>
               <SortHeader field="mlb" align="left" sortField={sortField} sortDir={sortDir} onSort={sortBy}>MLB / Título</SortHeader>
+              <SortHeader field="share" sortField={sortField} sortDir={sortDir} onSort={sortBy}>Share GMV 30d</SortHeader>
               <th className="p-3">Campanha</th>
               <th className="p-3">Recomendação</th>
               <SortHeader field="precoAtual" sortField={sortField} sortDir={sortDir} onSort={sortBy}>Preço Atual</SortHeader>
@@ -408,6 +425,10 @@ export default function DecisionTable({
                       🔄 {r.campanha_anterior_tipo} → {r.promotion_type}
                     </div>
                   )}
+                </td>
+                <td className="p-3 text-right">
+                  <div className="font-medium">{fmtShare(r.share_gmv_pct)}</div>
+                  <div className="text-xs text-neutral-400">{fmtGmv(r.gmv_30d)}</div>
                 </td>
                 <td className="p-3">{r.promotion_type}</td>
                 <td className="p-3">
@@ -476,6 +497,7 @@ export default function DecisionTable({
             {avgDeltaMargem != null && (
               <>, variação média de margem {avgDeltaMargem >= 0 ? "+" : ""}{avgDeltaMargem.toFixed(1)}pp</>
             )}
+            {shareSelecionados != null && <>, somando {fmtShare(shareSelecionados)} do GMV 30d</>}
             .
           </p>
           <button

@@ -12,6 +12,7 @@ import {
 } from "@/lib/scoring";
 import type { ItemDetail, ItemPromotion } from "@/lib/mercadolivre/types";
 import { hojeBrasilia } from "@/lib/timezone";
+import { atualizarGmvNaRodada } from "@/lib/gmv";
 
 export type ProgressEvent =
   | { type: "log"; message: string }
@@ -1109,6 +1110,7 @@ export async function* runUpdate(
   const client = await MercadoLivreClient.fromStore();
   const userId = await client.getUserId();
   const ctx: RunContext = { client, userId, taxasPct, weights, runId };
+  if (!resumeRunId) yield { type: "log", message: await atualizarGmvNaRodada(supabase, client, userId) };
 
   let doneCount = jaProcessados.size;
 

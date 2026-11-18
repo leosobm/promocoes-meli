@@ -5,6 +5,7 @@ import { getCampaignTypeConfig } from "@/lib/mercadolivre/campaignTypes";
 import { arredondarPrecoPsicologico, calcMargemResultante } from "@/lib/scoring";
 import type { ItemPromotion, PriceToWin } from "@/lib/mercadolivre/types";
 import { BOOST_CATALOGO, MOTIVO_CATALOGO, rotuloBoost } from "@/lib/catalogLabels";
+import { atualizarGmvNaRodada } from "@/lib/gmv";
 import {
   ACTIVE_STATUSES,
   calcStockSugerido,
@@ -411,6 +412,7 @@ export async function* runCatalogUpdate(resumeRunId?: string): AsyncGenerator<Pr
   const client = await MercadoLivreClient.fromStore();
   const userId = await client.getUserId();
   const ctx: CatalogContext = { client, userId, taxasPct, runId };
+  if (!resumeRunId) yield { type: "log", message: await atualizarGmvNaRodada(supabase, client, userId) };
   let doneCount = jaProcessados.size;
 
   for (let i = 0; i < mlbs.length; i += CONCURRENCY) {

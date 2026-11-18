@@ -124,6 +124,13 @@ export interface PriceToWin {
   winner?: { item_id: string; price: number | null; boosts?: CatalogBoost[] } | null;
 }
 
+/** Só os campos de /orders/search usados no cálculo de GMV. */
+export interface OrderResumo {
+  id: number;
+  status: string; // paid | cancelled | invalid | partially_refunded | ...
+  order_items: { item: { id: string }; quantity: number; unit_price: number }[];
+}
+
 export interface JoinResult {
   ok: boolean;
   status_code: number | null;

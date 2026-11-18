@@ -1,6 +1,7 @@
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isConnected } from "@/lib/mercadolivre/tokens";
 import { fetchAllPages } from "@/lib/reportData";
+import { carregarGmv } from "@/lib/gmv";
 import UpdateButton from "@/components/UpdateButton";
 import CatalogoTable, { type CatalogContagem, type CatalogRow } from "@/components/CatalogoTable";
 
@@ -20,8 +21,11 @@ export default async function CatalogoPage() {
 
   const contagem: CatalogContagem = { ganhando: 0, preco: 0, outro_motivo: 0, erro: 0 };
   let rows: CatalogRow[] = [];
+  let gmvCalculadoEm: string | null = null;
   if (ultima) {
-    type Raw = Omit<CatalogRow, "title" | "sku" | "situacao"> & { situacao: CatalogRow["situacao"] | "ganhando" };
+    type Raw = Omit<CatalogRow, "title" | "sku" | "situacao" | "gmv_30d" | "share_gmv_pct"> & {
+      situacao: CatalogRow["situacao"] | "ganhando";
+    };
     const todas = await fetchAllPages<Raw>((from, to) =>
       supabase
         .from("catalog_decisions")
@@ -32,7 +36,9 @@ export default async function CatalogoPage() {
         .range(from, to),
     );
     for (const r of todas) contagem[r.situacao] += 1;
-    const acionaveis = todas.filter((r): r is Omit<CatalogRow, "title" | "sku"> => r.situacao !== "ganhando");
+    const acionaveis = todas.filter(
+      (r): r is Omit<CatalogRow, "title" | "sku" | "gmv_30d" | "share_gmv_pct"> => r.situacao !== "ganhando",
+    );
 
     // .in() vai na URL — blocos pequenos (ver mlbsAtivosNoCache).
     const mlbs = [...new Set(acionaveis.map((r) => r.mlb))];
@@ -41,7 +47,17 @@ export default async function CatalogoPage() {
       const { data } = await supabase.from("items_cache").select("mlb, title, sku").in("mlb", mlbs.slice(i, i + 150));
       for (const it of data ?? []) cache.set(it.mlb, { title: it.title, sku: it.sku });
     }
-    rows = acionaveis.map((r) => ({ ...r, title: cache.get(r.mlb)?.title ?? null, sku: cache.get(r.mlb)?.sku ?? null }));
+    const gmv = await carregarGmv(supabase, mlbs);
+    gmvCalculadoEm = gmv.calculadoEm;
+    const temFoto = gmv.calculadoEm !== null;
+    rows = acionaveis.map((r) => ({
+      ...r,
+      title: cache.get(r.mlb)?.title ?? null,
+      sku: cache.get(r.mlb)?.sku ?? null,
+      // Sem linha na foto = sem venda no período (0%); sem foto = nunca calculado.
+      gmv_30d: temFoto ? (gmv.porMlb.get(r.mlb)?.gmv ?? 0) : null,
+      share_gmv_pct: temFoto ? (gmv.porMlb.get(r.mlb)?.share_pct ?? 0) : null,
+    }));
   }
 
   return (
@@ -61,6 +77,12 @@ export default async function CatalogoPage() {
           {ultima && (
             <p className="mt-3 text-xs text-neutral-500">
               Última análise: {new Date(ultima.created_at).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })}
+              {gmvCalculadoEm && (
+                <>
+                  {" "}· share de GMV (30 dias) calculado em{" "}
+                  {new Date(gmvCalculadoEm).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })}
+                </>
+              )}
             </p>
           )}
         </div>

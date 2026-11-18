@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { rotuloBoost } from "@/lib/catalogLabels";
+import { fmtGmv, fmtShare } from "@/lib/gmvFormat";
 
 export interface CatalogRow {
   id: string;
@@ -31,6 +32,8 @@ export interface CatalogRow {
   gravavel: boolean;
   motivo: string;
   status: string;
+  gmv_30d: number | null; // R$ vendidos nos últimos 30 dias (null = foto de GMV nunca calculada)
+  share_gmv_pct: number | null; // % do GMV total da conta no período
 }
 
 export interface CatalogContagem {
@@ -54,7 +57,7 @@ const STATUS_LINHA: Record<string, { texto: string; cls: string }> = {
 };
 
 type Aba = "preco" | "outro_motivo" | "erro";
-type SortField = "mlb" | "precoAtual" | "precoGanhar" | "margem" | "incentivo";
+type SortField = "mlb" | "precoAtual" | "precoGanhar" | "margem" | "incentivo" | "share";
 
 const PAGE_SIZE = 50;
 
@@ -91,6 +94,15 @@ function MlbCell({ r }: { r: CatalogRow }) {
   );
 }
 
+function ShareCell({ r }: { r: CatalogRow }) {
+  return (
+    <td className="p-3 text-right">
+      <div className="font-medium">{fmtShare(r.share_gmv_pct)}</div>
+      <div className="text-xs text-neutral-400">{fmtGmv(r.gmv_30d)}</div>
+    </td>
+  );
+}
+
 export default function CatalogoTable({ rows, contagem }: { rows: CatalogRow[]; contagem: CatalogContagem }) {
   const router = useRouter();
   const [aba, setAba] = useState<Aba>(contagem.preco > 0 ? "preco" : contagem.outro_motivo > 0 ? "outro_motivo" : "erro");
@@ -105,6 +117,16 @@ export default function CatalogoTable({ rows, contagem }: { rows: CatalogRow[]; 
   const [applying, setApplying] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const [failures, setFailures] = useState<{ mlb: string; detalhe: string }[]>([]);
+
+  const shareEmDisputa = useMemo(() => {
+    let preco = 0;
+    let outro = 0;
+    for (const r of rows) {
+      if (r.situacao === "preco") preco += r.share_gmv_pct ?? 0;
+      else if (r.situacao === "outro_motivo") outro += r.share_gmv_pct ?? 0;
+    }
+    return { preco, outro };
+  }, [rows]);
 
   const filtered = useMemo(() => {
     const b = busca.trim().toLowerCase();
@@ -123,6 +145,7 @@ export default function CatalogoTable({ rows, contagem }: { rows: CatalogRow[]; 
         case "precoGanhar": return r.preco_sugerido ?? -Infinity;
         case "margem": return r.margem_sem_incentivo_pct ?? -Infinity;
         case "incentivo": return r.incentivo_necessario_valor ?? Infinity;
+        case "share": return r.share_gmv_pct ?? -Infinity;
         default: return r.mlb;
       }
     };
@@ -227,6 +250,12 @@ export default function CatalogoTable({ rows, contagem }: { rows: CatalogRow[]; 
           <span className="rounded-full bg-red-100 px-3 py-1 font-medium text-red-800">Erros: {contagem.erro}</span>
         )}
       </div>
+      {shareEmDisputa.preco + shareEmDisputa.outro > 0 && (
+        <p className="text-xs text-neutral-500">
+          Anúncios perdendo o buybox somam <b>{fmtShare(shareEmDisputa.preco + shareEmDisputa.outro)}</b> do GMV
+          dos últimos 30 dias (preço: {fmtShare(shareEmDisputa.preco)} · outro motivo: {fmtShare(shareEmDisputa.outro)}).
+        </p>
+      )}
 
       <div className="flex flex-wrap gap-1 border-b border-neutral-200">
         {abas.filter((a) => a.n > 0 || a.id !== "erro").map((a) => (
@@ -271,6 +300,7 @@ export default function CatalogoTable({ rows, contagem }: { rows: CatalogRow[]; 
                     {selecionaveis.length > 0 && <input type="checkbox" checked={todosSelecionados} onChange={toggleTodos} />}
                   </th>
                   <Th field="mlb" align="left" sortField={sortField} sortDir={sortDir} onSort={sortBy}>MLB / Título</Th>
+                  <Th field="share" sortField={sortField} sortDir={sortDir} onSort={sortBy}>Share GMV 30d</Th>
                   <Th field="precoAtual" sortField={sortField} sortDir={sortDir} onSort={sortBy}>Preço atual</Th>
                   <th className="p-3 text-right">Vencedor</th>
                   <Th field="precoGanhar" sortField={sortField} sortDir={sortDir} onSort={sortBy}>Preço p/ ganhar</Th>
@@ -291,6 +321,7 @@ export default function CatalogoTable({ rows, contagem }: { rows: CatalogRow[]; 
                         )}
                       </td>
                       <MlbCell r={r} />
+                      <ShareCell r={r} />
                       <td className="p-3 text-right text-neutral-500">{money(r.preco_atual)}</td>
                       <td className="p-3 text-right text-neutral-500">{money(r.vencedor_preco)}</td>
                       <td className="p-3 text-right">
@@ -353,6 +384,7 @@ export default function CatalogoTable({ rows, contagem }: { rows: CatalogRow[]; 
               <thead className="bg-neutral-50 text-left text-xs uppercase text-neutral-500">
                 <tr>
                   <Th field="mlb" align="left" sortField={sortField} sortDir={sortDir} onSort={sortBy}>MLB / Título</Th>
+                  <Th field="share" sortField={sortField} sortDir={sortDir} onSort={sortBy}>Share GMV 30d</Th>
                   <th className="p-3">Situação</th>
                   <Th field="precoAtual" sortField={sortField} sortDir={sortDir} onSort={sortBy}>Preço atual</Th>
                   <th className="p-3 text-right">Vencedor</th>
@@ -364,6 +396,7 @@ export default function CatalogoTable({ rows, contagem }: { rows: CatalogRow[]; 
                 {paged.map((r) => (
                   <tr key={r.id} className="border-t border-neutral-100 align-top">
                     <MlbCell r={r} />
+                    <ShareCell r={r} />
                     <td className="p-3 text-xs">{STATUS_COMPETICAO[r.status_competicao ?? ""] ?? r.status_competicao ?? "-"}</td>
                     <td className="p-3 text-right text-neutral-500">{money(r.preco_atual)}</td>
                     <td className="p-3 text-right text-neutral-500">{money(r.vencedor_preco)}</td>

@@ -1,5 +1,6 @@
 import { createServerSupabase } from "@/lib/supabase/server";
 import { fetchAllPages, getLatestRunId } from "@/lib/reportData";
+import { carregarGmv } from "@/lib/gmv";
 import PainelClient from "@/components/PainelClient";
 import type { DecisionRow } from "@/components/DecisionTable";
 
@@ -10,7 +11,7 @@ export default async function PainelPage() {
   const supabase = await createServerSupabase();
   const latestRunId = await getLatestRunId(supabase);
 
-  type RawRow = Omit<DecisionRow, "title" | "sku">;
+  type RawRow = Omit<DecisionRow, "title" | "sku" | "gmv_30d" | "share_gmv_pct">;
 
   const decisions = await fetchAllPages<RawRow>((from, to) => {
     let q = supabase
@@ -37,18 +38,24 @@ export default async function PainelPage() {
   });
 
   const allMlbs = [...new Set([...decisions, ...toleranciaDecisions].map((d) => d.mlb))];
-  const itemsCache = allMlbs.length
-    ? await fetchAllPages<{ mlb: string; title: string | null; sku: string | null }>((from, to) =>
-        supabase.from("items_cache").select("mlb, title, sku").in("mlb", allMlbs).range(from, to),
-      )
-    : [];
-  const titleByMlb = new Map(itemsCache.map((i) => [i.mlb, i]));
+  // .in() vai na URL — com centenas de MLBs numa chamada só a consulta
+  // falhava calada e os títulos sumiam (ver mlbsAtivosNoCache).
+  const titleByMlb = new Map<string, { title: string | null; sku: string | null }>();
+  for (let i = 0; i < allMlbs.length; i += 150) {
+    const { data } = await supabase.from("items_cache").select("mlb, title, sku").in("mlb", allMlbs.slice(i, i + 150));
+    for (const it of data ?? []) titleByMlb.set(it.mlb, { title: it.title, sku: it.sku });
+  }
+  const gmv = await carregarGmv(supabase, allMlbs);
+  const temFotoGmv = gmv.calculadoEm !== null;
 
   const withTitles = (list: RawRow[]): DecisionRow[] =>
     list.map((d) => ({
       ...d,
       title: titleByMlb.get(d.mlb)?.title ?? null,
       sku: titleByMlb.get(d.mlb)?.sku ?? null,
+      // Sem linha na foto = sem venda no período (0%); sem foto = nunca calculado.
+      gmv_30d: temFotoGmv ? (gmv.porMlb.get(d.mlb)?.gmv ?? 0) : null,
+      share_gmv_pct: temFotoGmv ? (gmv.porMlb.get(d.mlb)?.share_pct ?? 0) : null,
     }));
 
   return (
@@ -60,6 +67,12 @@ export default async function PainelPage() {
           aguardando sua revisão. Nada foi gravado no Mercado Livre ainda — selecione e confirme
           para aplicar.
         </p>
+        {gmv.calculadoEm && (
+          <p className="mt-1 text-xs text-neutral-400">
+            Share de GMV: últimos 30 dias, calculado em{" "}
+            {new Date(gmv.calculadoEm).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })}.
+          </p>
+        )}
       </div>
       <PainelClient rows={withTitles(decisions)} toleranciaRows={withTitles(toleranciaDecisions)} />
     </div>

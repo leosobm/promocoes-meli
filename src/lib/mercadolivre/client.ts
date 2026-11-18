@@ -6,6 +6,7 @@ import type {
   ItemDetail,
   ItemPromotion,
   JoinResult,
+  OrderResumo,
   PriceToWin,
   PromotionType,
 } from "./types";
@@ -287,6 +288,32 @@ export class MercadoLivreClient {
       }
     }
     return out;
+  }
+
+  /** Uma página de /orders/search do vendedor numa janela de data_created. */
+  async searchOrders(
+    sellerId: number,
+    de: Date,
+    ate: Date,
+    offset: number,
+    limit = 51,
+  ): Promise<{ total: number; results: OrderResumo[] }> {
+    const { status, data } = await this.request<{ paging?: { total: number }; results?: OrderResumo[] }>(
+      "GET",
+      "/orders/search",
+      {
+        params: {
+          seller: sellerId,
+          "order.date_created.from": de.toISOString(),
+          "order.date_created.to": ate.toISOString(),
+          sort: "date_asc",
+          limit,
+          offset,
+        },
+      },
+    );
+    if (status !== 200) throw new Error(`Falha ao buscar pedidos (${status}): ${JSON.stringify(data).slice(0, 300)}`);
+    return { total: data.paging?.total ?? 0, results: data.results ?? [] };
   }
 
   async getPriceToWin(itemId: string): Promise<{ ok: true; data: PriceToWin } | { ok: false; error: string }> {
